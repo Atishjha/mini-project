@@ -1,0 +1,2135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Emergency Response System</title>
+    
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🚨</text></svg>">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        
+        body {
+            font-family: 'Segoe UI', sans-serif;
+            padding-top: 60px;
+            background-color: #f4f4f4;
+        }
+        
+        .navbar {
+            background: linear-gradient(135deg, #1e3c72, #2a5298);
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            z-index: 1100;
+        }
+        
+        .sidebar {
+            position: fixed;
+            left: 0;
+            top: 60px;
+            bottom: 0;
+            width: 300px;
+            overflow-y: auto;
+            padding: 15px;
+            background: #f8f9fa;
+            border-right: 1px solid #dee2e6;
+            z-index: 1000;
+        }
+        
+        .map-container {
+            margin-left: 300px;
+            padding: 15px;
+            height: calc(100vh - 90px);
+        }
+        
+        #map {
+            height: 100%;
+            width: 100%;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            z-index: 1;
+        }
+        
+        .modal { pointer-events: none; }
+        .modal-dialog { pointer-events: auto; }
+        
+        .stat-card {
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+            color: white;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            transition: transform 0.3s;
+        }
+        .stat-card:hover { transform: translateY(-5px); }
+        .stat-card i { font-size: 24px; margin-bottom: 10px; }
+        .stat-card h3 { font-size: 28px; font-weight: bold; margin: 5px 0; }
+        
+        .emergency-marker {
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+            border: 2px solid white;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+        }
+        .emergency-marker.critical { background: #ff0000; width: 40px; height: 40px; font-size: 16px; animation: pulse 2s infinite; }
+        .emergency-marker.high { background: #ff6600; width: 35px; height: 35px; font-size: 14px; animation: pulse 2s infinite; }
+        .emergency-marker.medium { background: #ffcc00; width: 30px; height: 30px; font-size: 12px; color: #000; }
+        .emergency-marker.low { background: #00cc00; width: 25px; height: 25px; font-size: 11px; }
+        
+        @keyframes pulse {
+            0% { box-shadow: 0 0 0 0 rgba(255, 0, 0, 0.7); }
+            70% { box-shadow: 0 0 0 15px rgba(255, 0, 0, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(255, 0, 0, 0); }
+        }
+        
+        .resource-icon { font-size: 24px; filter: drop-shadow(0 2px 2px rgba(0,0,0,0.3)); }
+        .resource-icon.ambulance { color: #dc3545; }
+        .resource-icon.fire { color: #ffc107; }
+        .resource-icon.police { color: #28a745; }
+        
+        .legend {
+            position: absolute;
+            bottom: 30px;
+            right: 10px;
+            z-index: 1000;
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+            min-width: 200px;
+        }
+        .legend-item { display: flex; align-items: center; margin: 8px 0; }
+        .legend-color { width: 20px; height: 20px; border-radius: 50%; margin-right: 10px; }
+        .legend-color.critical { background: #ff0000; }
+        .legend-color.high { background: #ff6600; }
+        .legend-color.medium { background: #ffcc00; }
+        .legend-color.low { background: #00cc00; }
+        
+        .incident-item {
+            padding: 10px;
+            margin-bottom: 8px;
+            background: white;
+            border-radius: 6px;
+            border-left: 4px solid;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+        .incident-item:hover { transform: translateX(5px); }
+        .incident-item.critical { border-left-color: #ff0000; }
+        .incident-item.high { border-left-color: #ff6600; }
+        .incident-item.medium { border-left-color: #ffcc00; }
+        .incident-item.low { border-left-color: #00cc00; }
+        
+        .toast-container { position: fixed; top: 70px; right: 20px; z-index: 9999; }
+        .toast { min-width: 300px; margin-bottom: 10px; animation: slideIn 0.3s ease; }
+        @keyframes slideIn {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+        
+        .loading-overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.8);
+            display: flex; justify-content: center; align-items: center;
+            z-index: 10000; color: white; font-size: 20px; flex-direction: column;
+        }
+        .spinner {
+            width: 50px; height: 50px;
+            border: 5px solid #f3f3f3; border-top: 5px solid #3498db;
+            border-radius: 50%; animation: spin 1s linear infinite; margin-bottom: 20px;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+        /* ===== ADDRESS SEARCH STYLES ===== */
+        .location-method-tabs {
+            display: flex;
+            gap: 4px;
+            margin-bottom: 12px;
+            background: #f1f3f5;
+            padding: 4px;
+            border-radius: 10px;
+        }
+
+        .loc-tab-btn {
+            flex: 1;
+            padding: 8px 10px;
+            border: none;
+            border-radius: 8px;
+            background: transparent;
+            font-size: 12px;
+            font-weight: 600;
+            color: #6c757d;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 5px;
+        }
+        .loc-tab-btn.active {
+            background: white;
+            color: #1e3c72;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.15);
+        }
+        .loc-tab-btn:hover:not(.active) {
+            background: rgba(255,255,255,0.6);
+            color: #1e3c72;
+        }
+
+        .location-panel { display: none; }
+        .location-panel.active { display: block; }
+
+        /* Search box */
+        .address-search-wrapper {
+            position: relative;
+        }
+        .address-search-input {
+            width: 100%;
+            padding: 10px 42px 10px 14px;
+            border: 2px solid #dee2e6;
+            border-radius: 8px;
+            font-size: 14px;
+            transition: border-color 0.2s, box-shadow 0.2s;
+            outline: none;
+        }
+        .address-search-input:focus {
+            border-color: #2a5298;
+            box-shadow: 0 0 0 3px rgba(42, 82, 152, 0.12);
+        }
+        .address-search-btn {
+            position: absolute;
+            right: 6px;
+            top: 50%;
+            transform: translateY(-50%);
+            background: #2a5298;
+            border: none;
+            border-radius: 6px;
+            width: 30px;
+            height: 30px;
+            color: white;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 13px;
+            transition: background 0.2s;
+        }
+        .address-search-btn:hover { background: #1e3c72; }
+        .address-search-btn.searching {
+            animation: spin 0.8s linear infinite;
+            pointer-events: none;
+        }
+
+        /* Suggestions dropdown */
+        .address-suggestions {
+            position: absolute;
+            top: calc(100% + 4px);
+            left: 0;
+            right: 0;
+            background: white;
+            border: 1px solid #dee2e6;
+            border-radius: 8px;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.12);
+            z-index: 9999;
+            max-height: 240px;
+            overflow-y: auto;
+            display: none;
+        }
+        .address-suggestions.visible { display: block; }
+        .suggestion-item {
+            padding: 10px 14px;
+            cursor: pointer;
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+            border-bottom: 1px solid #f1f3f5;
+            transition: background 0.15s;
+            font-size: 13px;
+        }
+        .suggestion-item:last-child { border-bottom: none; }
+        .suggestion-item:hover { background: #f8f9fa; }
+        .suggestion-item i {
+            color: #dc3545;
+            margin-top: 2px;
+            flex-shrink: 0;
+            font-size: 14px;
+        }
+        .suggestion-item .sug-main { font-weight: 600; color: #212529; line-height: 1.3; }
+        .suggestion-item .sug-sub { color: #6c757d; font-size: 11px; margin-top: 2px; }
+        .suggestion-no-results {
+            padding: 14px;
+            text-align: center;
+            color: #6c757d;
+            font-size: 13px;
+        }
+
+        /* Selected location display */
+        .selected-location-card {
+            background: linear-gradient(135deg, #e8f5e9, #f1f8e9);
+            border: 1px solid #a5d6a7;
+            border-radius: 8px;
+            padding: 10px 14px;
+            margin-top: 10px;
+            display: none;
+            align-items: flex-start;
+            gap: 10px;
+        }
+        .selected-location-card.visible { display: flex; }
+        .selected-location-card i { color: #2e7d32; margin-top: 2px; flex-shrink: 0; }
+        .selected-location-card .loc-name { font-size: 13px; font-weight: 600; color: #1b5e20; }
+        .selected-location-card .loc-coords { font-size: 11px; color: #388e3c; margin-top: 2px; }
+        .loc-clear-btn {
+            margin-left: auto;
+            background: none;
+            border: none;
+            color: #888;
+            cursor: pointer;
+            font-size: 16px;
+            padding: 0 2px;
+            flex-shrink: 0;
+        }
+        .loc-clear-btn:hover { color: #dc3545; }
+
+        /* Map click instruction */
+        .map-click-instruction {
+            background: #fff3cd;
+            border: 1px solid #ffc107;
+            border-radius: 8px;
+            padding: 10px 14px;
+            font-size: 13px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            color: #664d03;
+        }
+        .map-click-instruction i { color: #f57c00; font-size: 18px; flex-shrink: 0; }
+
+        /* GPS panel */
+        .gps-panel-btn {
+            width: 100%;
+            padding: 12px;
+            border: 2px dashed #2a5298;
+            background: transparent;
+            border-radius: 8px;
+            color: #2a5298;
+            font-weight: 600;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+        .gps-panel-btn:hover { background: #e8eef8; }
+        .gps-panel-btn.loading { opacity: 0.7; pointer-events: none; }
+        
+        .current-location-btn {
+            position: absolute;
+            bottom: 100px;
+            right: 10px;
+            z-index: 1000;
+            background: white;
+            border: none;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+            color: #007bff;
+            transition: all 0.3s;
+        }
+        .current-location-btn:hover { background: #007bff; color: white; transform: scale(1.1); }
+        
+        /* ===== MINI MAP STYLES ===== */
+        .mini-map-wrapper {
+            border: 2px solid #dee2e6;
+            border-radius: 10px;
+            overflow: hidden;
+            background: #f8f9fa;
+            transition: border-color 0.2s, box-shadow 0.2s;
+        }
+        .mini-map-wrapper:hover {
+            border-color: #2a5298;
+            box-shadow: 0 0 0 3px rgba(42, 82, 152, 0.1);
+        }
+        .mini-map-wrapper.has-pin {
+            border-color: #28a745;
+            box-shadow: 0 0 0 3px rgba(40, 167, 69, 0.12);
+        }
+
+        .mini-map-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 12px;
+            background: linear-gradient(135deg, #1e3c72, #2a5298);
+            color: white;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        .mini-map-header i { font-size: 13px; flex-shrink: 0; }
+        .mini-map-header span { flex: 1; }
+
+        .mini-map-reset-btn {
+            background: rgba(255,255,255,0.2);
+            border: 1px solid rgba(255,255,255,0.4);
+            color: white;
+            border-radius: 5px;
+            padding: 3px 8px;
+            font-size: 11px;
+            cursor: pointer;
+            transition: background 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+        .mini-map-reset-btn:hover { background: rgba(255,255,255,0.35); }
+
+        .mini-map-canvas {
+            height: 260px;
+            width: 100%;
+            cursor: crosshair !important;
+            position: relative;
+        }
+        /* Override default Leaflet cursor inside mini map */
+        .mini-map-canvas .leaflet-container {
+            cursor: crosshair !important;
+        }
+        .mini-map-canvas .leaflet-grab {
+            cursor: crosshair !important;
+        }
+        .mini-map-canvas .leaflet-dragging .leaflet-grab {
+            cursor: grabbing !important;
+        }
+
+        .mini-map-footer {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 7px 12px;
+            background: #f1f3f5;
+            font-size: 12px;
+            border-top: 1px solid #dee2e6;
+            min-height: 34px;
+        }
+        .mini-map-footer.pinned {
+            background: #d4edda;
+            border-top-color: #c3e6cb;
+        }
+        .mini-map-footer.pinned i { color: #28a745 !important; }
+        .mini-map-footer.pinned span { color: #155724 !important; font-weight: 600; }
+
+        /* Animated drop-pin marker */
+        .mini-pin-marker {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            animation: pinDrop 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+        }
+        @keyframes pinDrop {
+            0%   { transform: translateY(-30px) scale(0.6); opacity: 0; }
+            60%  { transform: translateY(4px) scale(1.1); opacity: 1; }
+            100% { transform: translateY(0) scale(1); opacity: 1; }
+        }
+        .mini-pin-head {
+            width: 22px;
+            height: 22px;
+            background: #dc3545;
+            border: 3px solid white;
+            border-radius: 50% 50% 50% 0;
+            transform: rotate(-45deg);
+            box-shadow: 0 2px 8px rgba(220,53,69,0.5);
+        }
+        .mini-pin-shadow {
+            width: 10px;
+            height: 4px;
+            background: rgba(0,0,0,0.2);
+            border-radius: 50%;
+            margin-top: 1px;
+        }
+
+        /* ===== MEDIA / EVIDENCE SECTION ===== */
+
+        /* Inline verification badge */
+        .badge-unverified, .badge-verified {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 2px 8px;
+            border-radius: 20px;
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 0.4px;
+            vertical-align: middle;
+        }
+        .badge-unverified {
+            background: #fff3cd;
+            color: #856404;
+            border: 1px solid #ffc107;
+        }
+        .badge-verified {
+            background: #d1f0da;
+            color: #145a32;
+            border: 1px solid #28a745;
+        }
+
+        /* Upload drop-zone */
+        .media-upload-zone {
+            border: 2px dashed #ced4da;
+            border-radius: 10px;
+            padding: 20px 16px 14px;
+            text-align: center;
+            cursor: pointer;
+            transition: border-color 0.2s, background 0.2s, box-shadow 0.2s;
+            background: #fafbfc;
+            position: relative;
+        }
+        .media-upload-zone:hover, .media-upload-zone.dragover {
+            border-color: #2a5298;
+            background: #eef2fb;
+            box-shadow: 0 0 0 3px rgba(42,82,152,0.1);
+        }
+        .media-upload-zone.has-files {
+            border-style: solid;
+            border-color: #28a745;
+            background: #f6fef8;
+        }
+
+        .media-upload-icon {
+            font-size: 36px;
+            color: #adb5bd;
+            margin-bottom: 8px;
+            display: block;
+            transition: color 0.2s, transform 0.2s;
+        }
+        .media-upload-zone:hover .media-upload-icon {
+            color: #2a5298;
+            transform: translateY(-3px);
+        }
+        .media-upload-title {
+            font-weight: 700;
+            font-size: 14px;
+            color: #495057;
+            margin-bottom: 3px;
+        }
+        .media-upload-sub {
+            font-size: 11px;
+            color: #adb5bd;
+            margin-bottom: 14px;
+        }
+
+        /* Capture buttons row */
+        .media-btn-row {
+            display: flex;
+            gap: 8px;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+        .media-action-btn {
+            padding: 7px 14px;
+            border: none;
+            border-radius: 8px;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            transition: all 0.2s;
+        }
+        .photo-btn  { background: #e3f2fd; color: #1565c0; }
+        .video-btn  { background: #fce4ec; color: #b71c1c; }
+        .file-btn   { background: #f3e5f5; color: #6a1b9a; }
+        .photo-btn:hover  { background: #1565c0; color: white; transform: translateY(-1px); }
+        .video-btn:hover  { background: #b71c1c; color: white; transform: translateY(-1px); }
+        .file-btn:hover   { background: #6a1b9a; color: white; transform: translateY(-1px); }
+
+        /* Preview grid */
+        .media-preview-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(90px, 1fr));
+            gap: 8px;
+            margin-top: 10px;
+        }
+        .preview-thumb {
+            position: relative;
+            border-radius: 8px;
+            overflow: hidden;
+            aspect-ratio: 1;
+            background: #e9ecef;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.12);
+            animation: thumbIn 0.25s ease;
+        }
+        @keyframes thumbIn {
+            from { transform: scale(0.7); opacity: 0; }
+            to   { transform: scale(1);   opacity: 1; }
+        }
+        .preview-thumb img, .preview-thumb video {
+            width: 100%; height: 100%;
+            object-fit: cover;
+            display: block;
+        }
+        .preview-thumb .thumb-remove {
+            position: absolute;
+            top: 4px; right: 4px;
+            width: 20px; height: 20px;
+            background: rgba(0,0,0,0.65);
+            border: none;
+            border-radius: 50%;
+            color: white;
+            font-size: 10px;
+            display: flex; align-items: center; justify-content: center;
+            cursor: pointer;
+            opacity: 0;
+            transition: opacity 0.15s;
+        }
+        .preview-thumb:hover .thumb-remove { opacity: 1; }
+        .preview-thumb .thumb-type-badge {
+            position: absolute;
+            bottom: 4px; left: 4px;
+            background: rgba(0,0,0,0.55);
+            color: white;
+            font-size: 9px;
+            padding: 1px 5px;
+            border-radius: 4px;
+            font-weight: 700;
+        }
+
+        /* Verification bar */
+        .verification-bar {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-top: 12px;
+            padding: 10px 14px;
+            border-radius: 8px;
+            background: #fff8e1;
+            border: 1px solid #ffe082;
+            transition: background 0.4s, border-color 0.4s;
+        }
+        .verification-bar.verified {
+            background: #e8f5e9;
+            border-color: #a5d6a7;
+        }
+        .vbar-icon {
+            width: 38px; height: 38px;
+            border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 18px;
+            flex-shrink: 0;
+            transition: background 0.4s, color 0.4s;
+        }
+        .vbar-icon.unverified { background: #ffe082; color: #f57f17; }
+        .vbar-icon.verified   { background: #a5d6a7; color: #1b5e20; }
+        .vbar-text { flex: 1; }
+        .vbar-title { font-size: 13px; font-weight: 600; color: #333; }
+        .vbar-sub   { font-size: 11px; color: #777; margin-top: 1px; }
+        .vbar-count {
+            font-size: 12px;
+            font-weight: 700;
+            color: #888;
+            white-space: nowrap;
+        }
+        .verification-bar.verified .vbar-count { color: #2e7d32; }
+
+        /* Footer badge */
+        .footer-badge-verified {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 5px 12px;
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 700;
+        }
+        .footer-badge-unverified {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 5px 12px;
+            background: #fff3cd;
+            color: #856404;
+            border: 1px solid #ffc107;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 700;
+        }
+
+        /* ===== CAMERA OVERLAY ===== */
+        .camera-overlay {
+            position: absolute;
+            inset: 0;
+            background: rgba(0,0,0,0.85);
+            z-index: 2000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 6px;
+        }
+        .camera-box {
+            background: #111;
+            border-radius: 16px;
+            overflow: hidden;
+            width: 100%;
+            max-width: 480px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.8);
+        }
+        .camera-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 16px;
+            background: #1a1a1a;
+            color: white;
+            font-weight: 600;
+            font-size: 14px;
+        }
+        .camera-close-btn {
+            background: rgba(255,255,255,0.1);
+            border: none;
+            color: white;
+            width: 28px; height: 28px;
+            border-radius: 50%;
+            cursor: pointer;
+            font-size: 13px;
+            display: flex; align-items: center; justify-content: center;
+            transition: background 0.2s;
+        }
+        .camera-close-btn:hover { background: #dc3545; }
+        .camera-preview {
+            width: 100%;
+            max-height: 320px;
+            object-fit: cover;
+            background: #000;
+            display: block;
+        }
+        .camera-controls {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 24px;
+            padding: 20px;
+            background: #111;
+        }
+        .cam-ctrl-btn {
+            background: none;
+            border: none;
+            cursor: pointer;
+            transition: transform 0.15s;
+        }
+        .cam-ctrl-btn:hover { transform: scale(1.1); }
+        .cam-flip, .cam-cancel {
+            width: 44px; height: 44px;
+            border-radius: 50%;
+            background: rgba(255,255,255,0.12);
+            color: white;
+            font-size: 18px;
+            display: flex; align-items: center; justify-content: center;
+        }
+        .cam-flip:hover   { background: rgba(255,255,255,0.25); }
+        .cam-cancel:hover { background: #dc3545; }
+        .cam-capture {
+            width: 68px; height: 68px;
+            border-radius: 50%;
+            background: white;
+            position: relative;
+            display: flex; align-items: center; justify-content: center;
+        }
+        .cam-capture:hover { background: #f0f0f0; transform: scale(1.05); }
+        .cam-capture.recording { background: #dc3545; }
+        .cam-capture-ring {
+            display: block;
+            width: 54px; height: 54px;
+            border-radius: 50%;
+            border: 3px solid #333;
+        }
+        .cam-capture.recording .cam-capture-ring {
+            border-radius: 6px;
+            background: white;
+            width: 22px; height: 22px;
+            border: none;
+        }
+        .camera-hint {
+            text-align: center;
+            color: #aaa;
+            font-size: 12px;
+            padding-bottom: 14px;
+        }
+
+        /* Recording indicator */
+        @keyframes recPulse {
+            0%, 100% { opacity: 1; }
+            50%       { opacity: 0.3; }
+        }
+        .rec-dot {
+            display: inline-block;
+            width: 10px; height: 10px;
+            border-radius: 50%;
+            background: #dc3545;
+            margin-right: 5px;
+            animation: recPulse 1s infinite;
+        }
+
+        @media (max-width: 768px) {
+            .sidebar { position: relative; width: 100%; top: 0; }
+            .map-container { margin-left: 0; }
+            #map { height: 50vh; }
+            .mini-map-canvas { height: 200px; }
+            .media-btn-row { flex-direction: column; align-items: stretch; }
+        }
+    </style>
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="navbar navbar-dark fixed-top">
+        <div class="container-fluid">
+            <span class="navbar-brand">
+                <i class="fas fa-ambulance text-danger me-2"></i>
+                Emergency Response System
+            </span>
+            <div>
+                <span class="text-white me-3" id="live-status">
+                    <i class="fas fa-circle text-success"></i> Live
+                </span>
+                <button class="btn btn-outline-light btn-sm" onclick="refreshData()">
+                    <i class="fas fa-sync-alt"></i>
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Sidebar -->
+    <div class="sidebar">
+        <h5 class="mb-3"><i class="fas fa-dashboard"></i> Dashboard</h5>
+        
+        <div class="row g-2 mb-3">
+            <div class="col-6">
+                <div class="stat-card" style="background: linear-gradient(135deg, #dc3545, #c82333);">
+                    <i class="fas fa-exclamation-triangle"></i>
+                    <h3 id="active-incidents">0</h3>
+                    <small>Active Incidents</small>
+                </div>
+            </div>
+            <div class="col-6">
+                <div class="stat-card" style="background: linear-gradient(135deg, #28a745, #218838);">
+                    <i class="fas fa-truck"></i>
+                    <h3 id="available-resources">0</h3>
+                    <small>Resources</small>
+                </div>
+            </div>
+        </div>
+        
+        <div class="mb-3">
+            <h6><i class="fas fa-filter"></i> Filters</h6>
+            <select class="form-select mb-2" id="type-filter">
+                <option value="all">All Types</option>
+                <option value="fire">Fire</option>
+                <option value="medical">Medical</option>
+                <option value="accident">Accident</option>
+                <option value="flood">Flood</option>
+                <option value="earthquake">Earthquake</option>
+            </select>
+            <label class="form-label">Min Severity: <span id="severity-val">3</span></label>
+            <input type="range" class="form-range" min="1" max="5" value="3" id="severity-filter">
+            <button class="btn btn-primary w-100 mt-2" onclick="applyFilters()">
+                <i class="fas fa-check"></i> Apply
+            </button>
+        </div>
+        
+        <h6><i class="fas fa-list"></i> Active Incidents</h6>
+        <div id="incident-list" style="max-height: 300px; overflow-y: auto;">
+            <p class="text-muted text-center">No active incidents</p>
+        </div>
+        
+        <div class="mt-3">
+            <button class="btn btn-danger w-100 mb-2" onclick="openReportModal()">
+                <i class="fas fa-plus-circle"></i> Report Emergency
+            </button>
+            <button class="btn btn-info w-100" onclick="toggleHeatmap()">
+                <i class="fas fa-fire"></i> Toggle Heatmap
+            </button>
+        </div>
+    </div>
+
+    <!-- Map Container -->
+    <div class="map-container">
+        <div id="map"></div>
+        <button class="current-location-btn" onclick="goToCurrentLocation()" title="Go to my location">
+            <i class="fas fa-location-dot"></i>
+        </button>
+    </div>
+
+    <!-- Legend -->
+    <div class="legend">
+        <h6>Legend</h6>
+        <div class="legend-item"><div class="legend-color critical"></div><span>Critical (5)</span></div>
+        <div class="legend-item"><div class="legend-color high"></div><span>High (4)</span></div>
+        <div class="legend-item"><div class="legend-color medium"></div><span>Medium (3)</span></div>
+        <div class="legend-item"><div class="legend-color low"></div><span>Low (1-2)</span></div>
+        <hr>
+        <div class="legend-item"><i class="fas fa-ambulance resource-icon ambulance"></i><span class="ms-2">Ambulance</span></div>
+        <div class="legend-item"><i class="fas fa-fire-extinguisher resource-icon fire"></i><span class="ms-2">Fire Truck</span></div>
+        <div class="legend-item"><i class="fas fa-car resource-icon police"></i><span class="ms-2">Police</span></div>
+    </div>
+
+    <!-- ===== ENHANCED REPORT MODAL ===== -->
+    <div class="modal fade" id="reportModal" tabindex="-1" data-bs-backdrop="static" data-bs-keyboard="false">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header bg-danger text-white">
+                    <h5 class="modal-title">
+                        <i class="fas fa-exclamation-triangle me-2"></i>
+                        Report Emergency
+                    </h5>
+                    <button type="button" class="btn-close btn-close-white" onclick="closeReportModal()"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="report-form">
+                        <!-- Emergency Type -->
+                        <div class="mb-3">
+                            <label class="form-label fw-bold">Emergency Type</label>
+                            <select class="form-select" id="emergency-type" required>
+                                <option value="">Select type...</option>
+                                <option value="fire">🔥 Fire</option>
+                                <option value="medical">🚑 Medical Emergency</option>
+                                <option value="accident">💥 Accident</option>
+                                <option value="flood">🌊 Flood</option>
+                                <option value="earthquake">🏚️ Earthquake</option>
+                            </select>
+                        </div>
+
+                        <!-- Location Selection -->
+                        <div class="mb-3">
+                            <label class="form-label fw-bold">
+                                <i class="fas fa-map-marker-alt text-danger me-1"></i>
+                                Select Location
+                            </label>
+
+                            <!-- Method tabs -->
+                            <div class="location-method-tabs">
+                                <button type="button" class="loc-tab-btn active" onclick="switchLocationTab('search')" id="tab-search">
+                                    <i class="fas fa-search"></i> Search Address
+                                </button>
+                                <button type="button" class="loc-tab-btn" onclick="switchLocationTab('map')" id="tab-map">
+                                    <i class="fas fa-map-pin"></i> Click on Map
+                                </button>
+                                <button type="button" class="loc-tab-btn" onclick="switchLocationTab('gps')" id="tab-gps">
+                                    <i class="fas fa-location-dot"></i> Use GPS
+                                </button>
+                            </div>
+
+                            <!-- Search Panel -->
+                            <div class="location-panel active" id="panel-search">
+                                <div class="address-search-wrapper">
+                                    <input
+                                        type="text"
+                                        class="address-search-input"
+                                        id="address-search-input"
+                                        placeholder="Type an address or place name..."
+                                        autocomplete="off"
+                                        oninput="onAddressInput(this.value)"
+                                        onkeydown="onAddressKeydown(event)"
+                                    />
+                                    <button type="button" class="address-search-btn" id="address-search-btn" onclick="triggerAddressSearch()" title="Search">
+                                        <i class="fas fa-search"></i>
+                                    </button>
+                                    <div class="address-suggestions" id="address-suggestions"></div>
+                                </div>
+                                <div class="mt-2 text-muted" style="font-size: 12px;">
+                                    <i class="fas fa-info-circle"></i> Results powered by OpenStreetMap
+                                </div>
+                            </div>
+
+                            <!-- Map Click Panel — inline mini-map -->
+                            <div class="location-panel" id="panel-map">
+                                <div class="mini-map-wrapper">
+                                    <div class="mini-map-header">
+                                        <i class="fas fa-crosshairs"></i>
+                                        <span>Click anywhere on the map to drop a pin</span>
+                                        <button type="button" class="mini-map-reset-btn" id="mini-map-reset-btn" onclick="resetMiniMap()" title="Reset pin">
+                                            <i class="fas fa-undo"></i> Reset
+                                        </button>
+                                    </div>
+                                    <div id="mini-map" class="mini-map-canvas"></div>
+                                    <div class="mini-map-footer" id="mini-map-footer">
+                                        <i class="fas fa-map-pin text-muted"></i>
+                                        <span class="text-muted" id="mini-map-hint">No pin dropped yet — click the map above</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- GPS Panel -->
+                            <div class="location-panel" id="panel-gps">
+                                <button type="button" class="gps-panel-btn" id="gps-detect-btn" onclick="detectGPSLocation()">
+                                    <i class="fas fa-location-dot"></i> Detect My Current Location
+                                </button>
+                                <div class="mt-2 text-muted" style="font-size: 12px; text-align: center;">
+                                    <i class="fas fa-lock"></i> Location is used only for this report
+                                </div>
+                            </div>
+
+                            <!-- Selected Location Card (shown for all methods) -->
+                            <div class="selected-location-card" id="selected-location-card">
+                                <i class="fas fa-map-marker-alt"></i>
+                                <div>
+                                    <div class="loc-name" id="selected-loc-name">Selected Location</div>
+                                    <div class="loc-coords" id="selected-loc-coords"></div>
+                                </div>
+                                <button type="button" class="loc-clear-btn" onclick="clearLocation()" title="Clear location">
+                                    <i class="fas fa-times-circle"></i>
+                                </button>
+                            </div>
+
+                            <!-- Hidden coordinate fields -->
+                            <input type="hidden" id="selected-lat">
+                            <input type="hidden" id="selected-lng">
+                        </div>
+
+                        <!-- Severity -->
+                        <div class="mb-3">
+                            <label class="form-label fw-bold">Severity (1-5)</label>
+                            <input type="range" class="form-range" id="severity" min="1" max="5" value="3">
+                            <div class="d-flex justify-content-between">
+                                <span class="badge bg-success">Low (1)</span>
+                                <span class="badge bg-warning">Medium (3)</span>
+                                <span class="badge bg-danger">Critical (5)</span>
+                            </div>
+                        </div>
+
+                        <!-- Description -->
+                        <div class="mb-3">
+                            <label class="form-label fw-bold">Description</label>
+                            <textarea class="form-control" id="description" rows="3"
+                                      placeholder="Describe the emergency in detail..."></textarea>
+                        </div>
+
+                        <!-- ===== MEDIA EVIDENCE ===== -->
+                        <div class="mb-3">
+                            <label class="form-label fw-bold">
+                                <i class="fas fa-camera me-1 text-secondary"></i>
+                                Evidence &amp; Media
+                                <span class="ms-2" id="verification-badge-inline">
+                                    <span class="badge-unverified">
+                                        <i class="fas fa-clock"></i> Unverified
+                                    </span>
+                                </span>
+                            </label>
+
+                            <!-- Upload zone -->
+                            <div class="media-upload-zone" id="media-upload-zone"
+                                 onclick="document.getElementById('media-file-input').click()"
+                                 ondragover="onMediaDragOver(event)"
+                                 ondragleave="onMediaDragLeave(event)"
+                                 ondrop="onMediaDrop(event)">
+                                <div class="media-zone-inner" id="media-zone-inner">
+                                    <i class="fas fa-cloud-upload-alt media-upload-icon"></i>
+                                    <div class="media-upload-title">Drop photos &amp; videos here</div>
+                                    <div class="media-upload-sub">or click to browse &nbsp;·&nbsp; JPG, PNG, MP4, MOV</div>
+                                    <div class="media-btn-row">
+                                        <button type="button" class="media-action-btn photo-btn"
+                                                onclick="event.stopPropagation(); openCamera('photo')">
+                                            <i class="fas fa-camera"></i> Take Photo
+                                        </button>
+                                        <button type="button" class="media-action-btn video-btn"
+                                                onclick="event.stopPropagation(); openCamera('video')">
+                                            <i class="fas fa-video"></i> Record Video
+                                        </button>
+                                        <button type="button" class="media-action-btn file-btn"
+                                                onclick="event.stopPropagation(); document.getElementById('media-file-input').click()">
+                                            <i class="fas fa-folder-open"></i> Browse Files
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Hidden inputs -->
+                            <input type="file" id="media-file-input" accept="image/*,video/*" multiple
+                                   style="display:none" onchange="onMediaFilesSelected(this.files)">
+                            <!-- Camera capture inputs -->
+                            <input type="file" id="camera-photo-input" accept="image/*" capture="environment"
+                                   style="display:none" onchange="onMediaFilesSelected(this.files)">
+                            <input type="file" id="camera-video-input" accept="video/*" capture="environment"
+                                   style="display:none" onchange="onMediaFilesSelected(this.files)">
+
+                            <!-- Preview grid -->
+                            <div class="media-preview-grid" id="media-preview-grid"></div>
+
+                            <!-- Verification status bar -->
+                            <div class="verification-bar" id="verification-bar">
+                                <div class="vbar-icon unverified" id="vbar-icon">
+                                    <i class="fas fa-shield-halved"></i>
+                                </div>
+                                <div class="vbar-text">
+                                    <div class="vbar-title" id="vbar-title">Assessment: <strong>Unverified</strong></div>
+                                    <div class="vbar-sub" id="vbar-sub">Add at least one photo or video to verify this report</div>
+                                </div>
+                                <div class="vbar-count" id="vbar-count">0 files</div>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+
+                <!-- Camera modal (nested) -->
+                <div id="camera-overlay" class="camera-overlay" style="display:none">
+                    <div class="camera-box">
+                        <div class="camera-header">
+                            <span id="camera-title"><i class="fas fa-camera"></i> Take Photo</span>
+                            <button type="button" onclick="closeCamera()" class="camera-close-btn">
+                                <i class="fas fa-times"></i>
+                            </button>
+                        </div>
+                        <video id="camera-preview" class="camera-preview" autoplay playsinline muted></video>
+                        <canvas id="camera-canvas" style="display:none"></canvas>
+                        <div class="camera-controls">
+                            <button type="button" class="cam-ctrl-btn cam-flip" onclick="flipCamera()" title="Flip camera">
+                                <i class="fas fa-rotate"></i>
+                            </button>
+                            <button type="button" class="cam-ctrl-btn cam-capture" id="cam-capture-btn" onclick="captureMedia()">
+                                <span class="cam-capture-ring"></span>
+                            </button>
+                            <button type="button" class="cam-ctrl-btn cam-cancel" onclick="closeCamera()" title="Cancel">
+                                <i class="fas fa-xmark"></i>
+                            </button>
+                        </div>
+                        <div class="camera-hint" id="camera-hint">Tap the button to capture</div>
+                    </div>
+                </div>
+
+                <div class="modal-footer">
+                    <div class="me-auto">
+                        <span id="footer-verification-badge"></span>
+                    </div>
+                    <button type="button" class="btn btn-secondary" onclick="closeReportModal()">Cancel</button>
+                    <button type="button" class="btn btn-danger" onclick="submitReport()" id="submit-btn" disabled>
+                        <i class="fas fa-paper-plane"></i> Submit Report
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
+
+    <script>
+        // ==================== GLOBAL VARIABLES ====================
+        let map, incidentsLayer, resourcesLayer, heatmapLayer = null;
+        let selectedLocation = null;
+        let locationMarker = null;
+        let reportModal;
+        let isReportModalOpen = false;
+        let activeIncidents = [];
+        let userLocation = null;
+
+        // Mini-map state
+        let miniMap = null;
+        let miniPinMarker = null;
+        let miniMapInitialized = false;
+
+        // Address search state
+        let searchDebounceTimer = null;
+        let currentSuggestions = [];
+        let activeSuggestionIndex = -1;
+
+        // ==================== INITIALIZATION ====================
+        document.addEventListener('DOMContentLoaded', () => {
+            initializeMap();
+            loadData();
+            getUserLocation();
+
+            const modalEl = document.getElementById('reportModal');
+            reportModal = new bootstrap.Modal(modalEl);
+
+            modalEl.addEventListener('show.bs.modal', () => {
+                isReportModalOpen = true;
+            });
+
+            modalEl.addEventListener('hide.bs.modal', () => {
+                isReportModalOpen = false;
+                clearLocation();
+                closeSuggestions();
+                destroyMiniMap();
+                closeCamera();
+                resetMediaState();
+            });
+
+            // Close suggestions when clicking outside
+            document.addEventListener('click', (e) => {
+                if (!e.target.closest('.address-search-wrapper')) {
+                    closeSuggestions();
+                }
+            });
+
+            setInterval(loadData, 30000);
+        });
+
+        // ==================== LOCATION TAB SWITCHING ====================
+        function switchLocationTab(tab) {
+            document.querySelectorAll('.loc-tab-btn').forEach(btn => btn.classList.remove('active'));
+            document.getElementById('tab-' + tab).classList.add('active');
+            document.querySelectorAll('.location-panel').forEach(panel => panel.classList.remove('active'));
+            document.getElementById('panel-' + tab).classList.add('active');
+
+            if (tab === 'map') {
+                // Small delay so the panel is visible before Leaflet sizes itself
+                setTimeout(() => initMiniMap(), 80);
+            } else {
+                destroyMiniMap();
+            }
+        }
+
+        // ==================== MINI MAP ====================
+        function initMiniMap() {
+            if (miniMap) {
+                miniMap.invalidateSize();
+                return;
+            }
+
+            const center = userLocation
+                ? [userLocation.lat, userLocation.lng]
+                : [28.6139, 77.2090];
+
+            miniMap = L.map('mini-map', {
+                center: center,
+                zoom: 13,
+                zoomControl: true,
+                attributionControl: false,
+                scrollWheelZoom: true
+            });
+
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                maxZoom: 19
+            }).addTo(miniMap);
+
+            // If there's already a selected location, show it
+            if (selectedLocation) {
+                dropMiniPin(selectedLocation.lat, selectedLocation.lng, false);
+                miniMap.setView([selectedLocation.lat, selectedLocation.lng], 15);
+            }
+
+            miniMap.on('click', function(e) {
+                dropMiniPin(e.latlng.lat, e.latlng.lng, true);
+            });
+
+            miniMapInitialized = true;
+        }
+
+        function dropMiniPin(lat, lng, animate) {
+            // Remove old pin
+            if (miniPinMarker) miniMap.removeLayer(miniPinMarker);
+
+            const pinHtml = `
+                <div class="mini-pin-marker" style="${animate ? '' : 'animation:none'}">
+                    <div class="mini-pin-head"></div>
+                    <div class="mini-pin-shadow"></div>
+                </div>`;
+
+            miniPinMarker = L.marker([lat, lng], {
+                icon: L.divIcon({
+                    html: pinHtml,
+                    className: '',
+                    iconSize: [22, 30],
+                    iconAnchor: [11, 28]
+                }),
+                zIndexOffset: 1000
+            }).addTo(miniMap);
+
+            // Update footer
+            const footer = document.getElementById('mini-map-footer');
+            const hint = document.getElementById('mini-map-hint');
+            footer.classList.add('pinned');
+            hint.innerHTML = `<i class="fas fa-check-circle" style="color:#28a745"></i>&nbsp; Pin dropped at ${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+
+            // Wrapper border
+            document.querySelector('.mini-map-wrapper').classList.add('has-pin');
+
+            // Reverse geocode & set location
+            reverseGeocode(lat, lng).then(address => {
+                const name = address || `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+                hint.textContent = `📍 ${name.split(',').slice(0, 3).join(', ')}`;
+                selectLocationForReport({ lat, lng }, name);
+            });
+
+            // Pan map to pin
+            miniMap.panTo([lat, lng], { animate: true, duration: 0.4 });
+        }
+
+        function resetMiniMap() {
+            if (miniPinMarker) {
+                miniMap.removeLayer(miniPinMarker);
+                miniPinMarker = null;
+            }
+            const footer = document.getElementById('mini-map-footer');
+            const hint = document.getElementById('mini-map-hint');
+            footer.classList.remove('pinned');
+            hint.textContent = 'No pin dropped yet — click the map above';
+            document.querySelector('.mini-map-wrapper').classList.remove('has-pin');
+
+            // Also clear the main selected location
+            clearLocation();
+        }
+
+        function destroyMiniMap() {
+            if (miniMap) {
+                miniMap.remove();
+                miniMap = null;
+                miniPinMarker = null;
+                miniMapInitialized = false;
+            }
+        }
+
+        // ==================== ADDRESS SEARCH ====================
+        let searchAbortController = null;
+
+        function onAddressInput(value) {
+            clearTimeout(searchDebounceTimer);
+            activeSuggestionIndex = -1;
+
+            if (value.length < 3) {
+                closeSuggestions();
+                return;
+            }
+
+            searchDebounceTimer = setTimeout(() => {
+                searchAddress(value);
+            }, 400);
+        }
+
+        function onAddressKeydown(e) {
+            const suggestions = document.getElementById('address-suggestions');
+            const items = suggestions.querySelectorAll('.suggestion-item');
+
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                activeSuggestionIndex = Math.min(activeSuggestionIndex + 1, items.length - 1);
+                highlightSuggestion(items);
+            } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                activeSuggestionIndex = Math.max(activeSuggestionIndex - 1, -1);
+                highlightSuggestion(items);
+            } else if (e.key === 'Enter') {
+                e.preventDefault();
+                if (activeSuggestionIndex >= 0 && items[activeSuggestionIndex]) {
+                    items[activeSuggestionIndex].click();
+                } else {
+                    triggerAddressSearch();
+                }
+            } else if (e.key === 'Escape') {
+                closeSuggestions();
+            }
+        }
+
+        function highlightSuggestion(items) {
+            items.forEach((item, i) => {
+                item.style.background = i === activeSuggestionIndex ? '#e8eef8' : '';
+            });
+            if (activeSuggestionIndex >= 0 && items[activeSuggestionIndex]) {
+                items[activeSuggestionIndex].scrollIntoView({ block: 'nearest' });
+            }
+        }
+
+        function triggerAddressSearch() {
+            const query = document.getElementById('address-search-input').value.trim();
+            if (query.length >= 3) searchAddress(query);
+        }
+
+        async function searchAddress(query) {
+            // Cancel previous request
+            if (searchAbortController) searchAbortController.abort();
+            searchAbortController = new AbortController();
+
+            const btn = document.getElementById('address-search-btn');
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+
+            try {
+                const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=6&addressdetails=1`;
+                const response = await fetch(url, {
+                    signal: searchAbortController.signal,
+                    headers: { 'Accept': 'application/json' }
+                });
+
+                if (!response.ok) throw new Error('Search failed');
+                const results = await response.json();
+
+                displaySuggestions(results);
+            } catch (err) {
+                if (err.name !== 'AbortError') {
+                    showSuggestionsError('Search failed. Check your connection.');
+                }
+            } finally {
+                btn.innerHTML = '<i class="fas fa-search"></i>';
+            }
+        }
+
+        function displaySuggestions(results) {
+            const container = document.getElementById('address-suggestions');
+            activeSuggestionIndex = -1;
+
+            if (!results || results.length === 0) {
+                container.innerHTML = `<div class="suggestion-no-results"><i class="fas fa-search me-2"></i>No results found. Try a different search.</div>`;
+                container.classList.add('visible');
+                return;
+            }
+
+            currentSuggestions = results;
+            let html = '';
+
+            results.forEach((result, index) => {
+                const addr = result.address || {};
+                const main = result.name || addr.road || addr.neighbourhood || result.display_name.split(',')[0];
+                const sub = result.display_name;
+
+                html += `
+                    <div class="suggestion-item" onclick="selectSuggestion(${index})">
+                        <i class="fas fa-map-marker-alt"></i>
+                        <div>
+                            <div class="sug-main">${escapeHtml(main)}</div>
+                            <div class="sug-sub">${escapeHtml(sub)}</div>
+                        </div>
+                    </div>
+                `;
+            });
+
+            container.innerHTML = html;
+            container.classList.add('visible');
+        }
+
+        function showSuggestionsError(msg) {
+            const container = document.getElementById('address-suggestions');
+            container.innerHTML = `<div class="suggestion-no-results text-danger"><i class="fas fa-exclamation-circle me-2"></i>${msg}</div>`;
+            container.classList.add('visible');
+        }
+
+        function selectSuggestion(index) {
+            const result = currentSuggestions[index];
+            if (!result) return;
+
+            const lat = parseFloat(result.lat);
+            const lng = parseFloat(result.lon);
+            const name = result.display_name;
+
+            // Update input
+            document.getElementById('address-search-input').value = name.split(',').slice(0, 2).join(',');
+            closeSuggestions();
+
+            // Select on map
+            selectLocationForReport({ lat, lng }, name);
+
+            // Fly map to location
+            map.flyTo([lat, lng], 16, { animate: true, duration: 1.2 });
+        }
+
+        function closeSuggestions() {
+            const container = document.getElementById('address-suggestions');
+            container.classList.remove('visible');
+            activeSuggestionIndex = -1;
+        }
+
+        function escapeHtml(str) {
+            const div = document.createElement('div');
+            div.textContent = str;
+            return div.innerHTML;
+        }
+
+        // ==================== GPS LOCATION ====================
+        function detectGPSLocation() {
+            const btn = document.getElementById('gps-detect-btn');
+            btn.classList.add('loading');
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Detecting...';
+
+            if (!navigator.geolocation) {
+                showToast('Geolocation not supported by your browser', 'warning');
+                resetGPSButton();
+                return;
+            }
+
+            navigator.geolocation.getCurrentPosition(
+                (position) => {
+                    const lat = position.coords.latitude;
+                    const lng = position.coords.longitude;
+                    userLocation = { lat, lng };
+
+                    // Reverse geocode to get address
+                    reverseGeocode(lat, lng).then(address => {
+                        selectLocationForReport({ lat, lng }, address || `${lat.toFixed(5)}, ${lng.toFixed(5)}`);
+                        map.flyTo([lat, lng], 16, { animate: true, duration: 1.2 });
+                        resetGPSButton();
+                    });
+                },
+                (error) => {
+                    showToast('Could not get GPS location. Try another method.', 'warning');
+                    resetGPSButton();
+                },
+                { timeout: 10000, maximumAge: 60000 }
+            );
+        }
+
+        function resetGPSButton() {
+            const btn = document.getElementById('gps-detect-btn');
+            btn.classList.remove('loading');
+            btn.innerHTML = '<i class="fas fa-location-dot"></i> Detect My Current Location';
+        }
+
+        async function reverseGeocode(lat, lng) {
+            try {
+                const url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&addressdetails=1`;
+                const response = await fetch(url, { headers: { 'Accept': 'application/json' } });
+                const data = await response.json();
+                return data.display_name || null;
+            } catch {
+                return null;
+            }
+        }
+
+        // ==================== USER LOCATION (initial) ====================
+        function getUserLocation(useForReport = false) {
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition(
+                    (position) => {
+                        userLocation = { lat: position.coords.latitude, lng: position.coords.longitude };
+                        L.circleMarker([userLocation.lat, userLocation.lng], {
+                            radius: 8, color: '#28a745', fillColor: '#28a745',
+                            fillOpacity: 0.5, weight: 2
+                        }).addTo(map).bindPopup('Your location');
+                        map.setView([userLocation.lat, userLocation.lng], 14);
+                        if (useForReport && isReportModalOpen) selectLocationForReport(userLocation);
+                        showToast('Location detected!', 'success');
+                    },
+                    () => {
+                        userLocation = { lat: 28.6139, lng: 77.2090 };
+                        map.setView([userLocation.lat, userLocation.lng], 12);
+                    }
+                );
+            } else {
+                userLocation = { lat: 28.6139, lng: 77.2090 };
+            }
+        }
+
+        function goToCurrentLocation() {
+            if (userLocation) {
+                map.setView([userLocation.lat, userLocation.lng], 16);
+                const m = L.circleMarker([userLocation.lat, userLocation.lng], {
+                    radius: 12, color: '#28a745', fillColor: '#28a745',
+                    fillOpacity: 0.8, weight: 3
+                }).addTo(map).bindPopup('You are here').openPopup();
+                setTimeout(() => map.removeLayer(m), 3000);
+            } else {
+                getUserLocation();
+            }
+        }
+
+        // ==================== MAP FUNCTIONS ====================
+        function initializeMap() {
+            map = L.map('map').setView([28.6139, 77.2090], 12);
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '© OpenStreetMap'
+            }).addTo(map);
+
+            incidentsLayer = L.layerGroup().addTo(map);
+            resourcesLayer = L.layerGroup().addTo(map);
+
+            map.on('click', function(e) {
+                if (isReportModalOpen) {
+                    // Reverse geocode for a friendly name
+                    reverseGeocode(e.latlng.lat, e.latlng.lng).then(address => {
+                        selectLocationForReport(e.latlng, address || `${e.latlng.lat.toFixed(5)}, ${e.latlng.lng.toFixed(5)}`);
+                    });
+                }
+            });
+        }
+
+        // ==================== UNIFIED LOCATION SELECTION ====================
+        function selectLocationForReport(latlng, displayName) {
+            selectedLocation = latlng;
+
+            // Remove previous marker
+            if (locationMarker) map.removeLayer(locationMarker);
+
+            locationMarker = L.circleMarker([latlng.lat, latlng.lng], {
+                radius: 12, color: '#007bff', fillColor: '#007bff',
+                fillOpacity: 0.8, weight: 3
+            }).addTo(map);
+
+            // Update hidden fields
+            document.getElementById('selected-lat').value = latlng.lat.toFixed(6);
+            document.getElementById('selected-lng').value = latlng.lng.toFixed(6);
+
+            // Update selected location card
+            const card = document.getElementById('selected-location-card');
+            const nameEl = document.getElementById('selected-loc-name');
+            const coordsEl = document.getElementById('selected-loc-coords');
+
+            nameEl.textContent = displayName ? (displayName.length > 60 ? displayName.substring(0, 60) + '...' : displayName) : 'Selected Location';
+            coordsEl.textContent = `${latlng.lat.toFixed(6)}, ${latlng.lng.toFixed(6)}`;
+            card.classList.add('visible');
+
+            // Enable submit
+            document.getElementById('submit-btn').disabled = false;
+        }
+
+        function clearLocation() {
+            selectedLocation = null;
+            if (locationMarker) { map.removeLayer(locationMarker); locationMarker = null; }
+            document.getElementById('selected-lat').value = '';
+            document.getElementById('selected-lng').value = '';
+            document.getElementById('selected-location-card').classList.remove('visible');
+            document.getElementById('submit-btn').disabled = true;
+
+            // Reset search input
+            document.getElementById('address-search-input').value = '';
+            closeSuggestions();
+        }
+
+        // ==================== MODAL FUNCTIONS ====================
+        function openReportModal() {
+            clearLocation();
+            resetMediaState();
+            reportModal.show();
+            switchLocationTab('search');
+        }
+
+        function closeReportModal() {
+            reportModal.hide();
+        }
+
+        // ==================== SUBMIT ====================
+        function submitReport() {
+            if (!selectedLocation) { showToast('Please select a location', 'warning'); return; }
+            const type = document.getElementById('emergency-type').value;
+            if (!type) { showToast('Please select emergency type', 'warning'); return; }
+
+            const severity = document.getElementById('severity').value;
+            const description = document.getElementById('description').value;
+            const locName = document.getElementById('selected-loc-name').textContent;
+
+            const activeMedia = mediaFiles.filter(f => f !== null);
+            const isVerified = activeMedia.length > 0;
+
+            const newIncident = {
+                type: 'Feature',
+                geometry: { type: 'Point', coordinates: [selectedLocation.lng, selectedLocation.lat] },
+                properties: {
+                    id: activeIncidents.length + 1,
+                    type: type,
+                    severity: parseInt(severity),
+                    address: locName !== 'Selected Location' ? locName : `${selectedLocation.lat.toFixed(4)}, ${selectedLocation.lng.toFixed(4)}`,
+                    reported_at: new Date().toISOString(),
+                    status: 'active',
+                    description: description,
+                    verified: isVerified,
+                    media_count: activeMedia.length,
+                    photo_count: activeMedia.filter(f => f.type === 'photo').length,
+                    video_count: activeMedia.filter(f => f.type === 'video').length
+                }
+            };
+
+            activeIncidents.push(newIncident);
+            const incidentsData = { features: activeIncidents };
+            renderIncidents(incidentsData);
+            updateDashboard(incidentsData);
+
+            const verMsg = isVerified
+                ? `✓ Field-verified with ${activeMedia.length} file(s)`
+                : 'Submitted as unverified (no media)';
+            showToast(`Emergency reported! ${verMsg}`, isVerified ? 'success' : 'warning');
+            closeReportModal();
+            document.getElementById('report-form').reset();
+            setTimeout(loadData, 1000);
+        }
+
+        // ==================== DATA LOADING ====================
+        async function loadData() {
+            try {
+                let incidents, resources;
+                try {
+                    const incidentsRes = await fetch('http://localhost:5000/api/incidents/active');
+                    incidents = await incidentsRes.json();
+                    if (incidents.features) {
+                        if (activeIncidents.length === 0) {
+                            activeIncidents = incidents.features;
+                        } else {
+                            const existingIds = new Set(activeIncidents.map(i => i.properties.id));
+                            const newIncidents = incidents.features.filter(i => !existingIds.has(i.properties.id));
+                            activeIncidents = [...activeIncidents, ...newIncidents];
+                        }
+                        incidents.features = activeIncidents;
+                    }
+                } catch (e) {
+                    if (activeIncidents.length === 0) {
+                        incidents = getMockIncidents();
+                        activeIncidents = incidents.features;
+                    } else {
+                        incidents = { features: activeIncidents };
+                    }
+                }
+
+                try {
+                    const resourcesRes = await fetch('http://localhost:5000/api/resources/available');
+                    resources = await resourcesRes.json();
+                } catch (e) {
+                    resources = getMockResources();
+                }
+
+                renderIncidents(incidents);
+                renderResources(resources);
+                updateDashboard(incidents);
+            } catch (error) {
+                showToast('Error loading data', 'error');
+            }
+        }
+
+        // ==================== RENDERING ====================
+        function renderIncidents(data) {
+            incidentsLayer.clearLayers();
+            if (!data.features?.length) return;
+
+            data.features.forEach(f => {
+                const [lng, lat] = f.geometry.coordinates;
+                const props = f.properties;
+                const severity = props.severity || 3;
+                let markerClass = severity >= 5 ? 'critical' : severity >= 4 ? 'high' : severity >= 3 ? 'medium' : 'low';
+
+                const marker = L.marker([lat, lng], {
+                    icon: L.divIcon({
+                        html: `<div class="emergency-marker ${markerClass}">${severity}</div>`,
+                        className: '', iconSize: [40, 40]
+                    })
+                });
+
+                marker.bindPopup(`
+                    <div style="min-width: 200px;">
+                        <h6 class="mb-2">🚨 ${props.type.toUpperCase()}</h6>
+                        <p><strong>Severity:</strong> ${severity}/5</p>
+                        <p><strong>Location:</strong> ${props.address || 'Unknown'}</p>
+                        <p><strong>Reported:</strong> ${new Date(props.reported_at).toLocaleString()}</p>
+                        ${props.description ? `<p><strong>Details:</strong> ${props.description}</p>` : ''}
+                        <p><strong>Assessment:</strong>
+                            ${props.verified
+                                ? `<span style="color:#1b5e20;font-weight:700">✓ Field Verified</span> <span style="color:#aaa;font-size:11px">(${props.media_count || 0} file${(props.media_count||0)>1?'s':''})</span>`
+                                : `<span style="color:#856404;font-weight:700">⏳ Unverified</span>`
+                            }
+                        </p>
+                    </div>
+                `);
+                marker.addTo(incidentsLayer);
+            });
+        }
+
+        function renderResources(data) {
+            resourcesLayer.clearLayers();
+            if (!data.features?.length) return;
+
+            data.features.forEach(f => {
+                const [lng, lat] = f.geometry.coordinates;
+                const props = f.properties;
+                let icon = 'fa-ambulance', color = 'ambulance';
+                if (props.type === 'fire_truck') { icon = 'fa-fire-extinguisher'; color = 'fire'; }
+                else if (props.type === 'police') { icon = 'fa-car'; color = 'police'; }
+
+                const marker = L.marker([lat, lng], {
+                    icon: L.divIcon({
+                        html: `<i class="fas ${icon} resource-icon ${color}"></i>`,
+                        className: '', iconSize: [30, 30]
+                    })
+                });
+                marker.bindPopup(`<b>${props.type.replace('_', ' ').toUpperCase()}</b><br>Status: ${props.status}`);
+                marker.addTo(resourcesLayer);
+            });
+        }
+
+        function updateDashboard(incidents) {
+            document.getElementById('active-incidents').textContent = incidents.features?.length || 0;
+            document.getElementById('available-resources').textContent = 3;
+
+            const listEl = document.getElementById('incident-list');
+            if (!incidents.features?.length) {
+                listEl.innerHTML = '<p class="text-muted text-center">No active incidents</p>';
+                return;
+            }
+
+            let html = '';
+            incidents.features.forEach(f => {
+                const props = f.properties;
+                const [lng, lat] = f.geometry.coordinates;
+                const severity = props.severity || 3;
+                const sc = severity >= 5 ? 'critical' : severity >= 4 ? 'high' : severity >= 3 ? 'medium' : 'low';
+                html += `
+                    <div class="incident-item ${sc}" onclick="map.setView([${lat}, ${lng}], 15)">
+                        <strong>${props.type.toUpperCase()}</strong>
+                        <small class="d-block text-muted">${props.address || 'Unknown'}</small>
+                        <small>Severity: ${severity}/5</small>
+                    </div>`;
+            });
+            listEl.innerHTML = html;
+        }
+
+        // ==================== ACTIONS ====================
+        function toggleHeatmap() {
+            if (heatmapLayer) {
+                map.removeLayer(heatmapLayer);
+                heatmapLayer = null;
+                showToast('Heatmap disabled', 'info');
+            } else {
+                const heatData = [];
+                incidentsLayer.eachLayer(layer => {
+                    const ll = layer.getLatLng();
+                    heatData.push([ll.lat, ll.lng, 1]);
+                });
+                if (heatData.length > 0) {
+                    heatmapLayer = L.heatLayer(heatData, {
+                        radius: 25, blur: 15,
+                        gradient: { 0.2: '#00ff00', 0.4: '#ffff00', 0.6: '#ff9900', 0.8: '#ff0000' }
+                    }).addTo(map);
+                    showToast('Heatmap enabled', 'success');
+                } else {
+                    showToast('No data for heatmap', 'warning');
+                }
+            }
+        }
+
+        function applyFilters() {
+            document.getElementById('severity-val').textContent = document.getElementById('severity-filter').value;
+            showToast('Filters applied', 'info');
+        }
+
+        function refreshData() { loadData(); showToast('Data refreshed', 'success'); }
+
+        // ==================== MOCK DATA ====================
+        function getMockIncidents() {
+            return {
+                features: [
+                    { geometry: { coordinates: [77.2090, 28.6139] }, properties: { id: 1, type: 'fire', severity: 5, address: 'Connaught Place, Delhi', reported_at: new Date().toISOString() } },
+                    { geometry: { coordinates: [77.2190, 28.6239] }, properties: { id: 2, type: 'medical', severity: 4, address: 'Preet Vihar, Delhi', reported_at: new Date().toISOString() } },
+                    { geometry: { coordinates: [77.2290, 28.6099] }, properties: { id: 3, type: 'accident', severity: 3, address: 'Saket, Delhi', reported_at: new Date().toISOString() } }
+                ]
+            };
+        }
+
+        function getMockResources() {
+            return {
+                features: [
+                    { geometry: { coordinates: [77.1990, 28.6039] }, properties: { id: 1, type: 'ambulance', status: 'available' } },
+                    { geometry: { coordinates: [77.2290, 28.6339] }, properties: { id: 2, type: 'fire_truck', status: 'available' } },
+                    { geometry: { coordinates: [77.1890, 28.5939] }, properties: { id: 3, type: 'police', status: 'available' } }
+                ]
+            };
+        }
+
+        // ==================== UTILITIES ====================
+        function showToast(message, type = 'info') {
+            const bgMap = { success: 'success', warning: 'warning', error: 'danger', info: 'info' };
+            const toast = document.createElement('div');
+            toast.className = `toast align-items-center text-white bg-${bgMap[type] || 'info'} border-0`;
+            toast.innerHTML = `<div class="d-flex"><div class="toast-body">${message}</div><button type="button" class="btn-close btn-close-white me-2 m-auto" onclick="this.closest('.toast').remove()"></button></div>`;
+            let container = document.querySelector('.toast-container');
+            if (!container) {
+                container = document.createElement('div');
+                container.className = 'toast-container';
+                document.body.appendChild(container);
+            }
+            container.appendChild(toast);
+            setTimeout(() => toast.remove(), 3500);
+        }
+
+        // ==================== MEDIA / EVIDENCE ====================
+        let mediaFiles = [];         // { file, url, type: 'photo'|'video' }
+        let cameraStream = null;
+        let cameraMode = 'photo';    // 'photo' | 'video'
+        let mediaRecorder = null;
+        let recordedChunks = [];
+        let isRecording = false;
+        let facingMode = 'environment';
+
+        function onMediaDragOver(e) {
+            e.preventDefault();
+            document.getElementById('media-upload-zone').classList.add('dragover');
+        }
+        function onMediaDragLeave(e) {
+            document.getElementById('media-upload-zone').classList.remove('dragover');
+        }
+        function onMediaDrop(e) {
+            e.preventDefault();
+            document.getElementById('media-upload-zone').classList.remove('dragover');
+            const files = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('image/') || f.type.startsWith('video/'));
+            addMediaFiles(files);
+        }
+
+        function onMediaFilesSelected(fileList) {
+            const files = Array.from(fileList).filter(f => f.type.startsWith('image/') || f.type.startsWith('video/'));
+            addMediaFiles(files);
+            // Reset inputs so same file can be re-selected
+            document.getElementById('media-file-input').value = '';
+            document.getElementById('camera-photo-input').value = '';
+            document.getElementById('camera-video-input').value = '';
+        }
+
+        function addMediaFiles(files) {
+            files.forEach(file => {
+                const url = URL.createObjectURL(file);
+                const type = file.type.startsWith('video/') ? 'video' : 'photo';
+                mediaFiles.push({ file, url, type });
+                addThumbToGrid(mediaFiles.length - 1, url, type);
+            });
+            updateVerificationStatus();
+        }
+
+        function addThumbToGrid(index, url, type) {
+            const grid = document.getElementById('media-preview-grid');
+            const thumb = document.createElement('div');
+            thumb.className = 'preview-thumb';
+            thumb.id = `thumb-${index}`;
+
+            if (type === 'video') {
+                thumb.innerHTML = `
+                    <video src="${url}" muted playsinline preload="metadata"></video>
+                    <span class="thumb-type-badge"><i class="fas fa-video"></i> VID</span>
+                    <button class="thumb-remove" onclick="removeMedia(${index})" title="Remove">
+                        <i class="fas fa-times"></i>
+                    </button>`;
+            } else {
+                thumb.innerHTML = `
+                    <img src="${url}" alt="Evidence photo">
+                    <span class="thumb-type-badge"><i class="fas fa-image"></i> IMG</span>
+                    <button class="thumb-remove" onclick="removeMedia(${index})" title="Remove">
+                        <i class="fas fa-times"></i>
+                    </button>`;
+            }
+            grid.appendChild(thumb);
+        }
+
+        function removeMedia(index) {
+            URL.revokeObjectURL(mediaFiles[index].url);
+            mediaFiles[index] = null;
+            const thumb = document.getElementById(`thumb-${index}`);
+            if (thumb) {
+                thumb.style.transform = 'scale(0)';
+                thumb.style.opacity = '0';
+                thumb.style.transition = 'all 0.2s';
+                setTimeout(() => thumb.remove(), 200);
+            }
+            updateVerificationStatus();
+        }
+
+        function updateVerificationStatus() {
+            const activeFiles = mediaFiles.filter(f => f !== null);
+            const count = activeFiles.length;
+            const isVerified = count > 0;
+
+            // Upload zone style
+            const zone = document.getElementById('media-upload-zone');
+            zone.classList.toggle('has-files', isVerified);
+
+            // Inline badge next to label
+            const inlineBadge = document.getElementById('verification-badge-inline');
+            inlineBadge.innerHTML = isVerified
+                ? `<span class="badge-verified"><i class="fas fa-shield-halved"></i> Verified</span>`
+                : `<span class="badge-unverified"><i class="fas fa-clock"></i> Unverified</span>`;
+
+            // Verification bar
+            const bar = document.getElementById('verification-bar');
+            const icon = document.getElementById('vbar-icon');
+            const title = document.getElementById('vbar-title');
+            const sub = document.getElementById('vbar-sub');
+            const countEl = document.getElementById('vbar-count');
+
+            bar.classList.toggle('verified', isVerified);
+            icon.classList.toggle('unverified', !isVerified);
+            icon.classList.toggle('verified', isVerified);
+
+            if (isVerified) {
+                const photos = activeFiles.filter(f => f.type === 'photo').length;
+                const videos = activeFiles.filter(f => f.type === 'video').length;
+                const parts = [];
+                if (photos > 0) parts.push(`${photos} photo${photos > 1 ? 's' : ''}`);
+                if (videos > 0) parts.push(`${videos} video${videos > 1 ? 's' : ''}`);
+                title.innerHTML = `Assessment: <strong style="color:#1b5e20">✓ Verified</strong>`;
+                sub.textContent = `Includes ${parts.join(' & ')} — report marked as field-verified`;
+                countEl.textContent = `${count} file${count > 1 ? 's' : ''}`;
+            } else {
+                title.innerHTML = `Assessment: <strong>Unverified</strong>`;
+                sub.textContent = `Add at least one photo or video to verify this report`;
+                countEl.textContent = `0 files`;
+            }
+
+            // Footer badge
+            const footerBadge = document.getElementById('footer-verification-badge');
+            footerBadge.innerHTML = isVerified
+                ? `<span class="footer-badge-verified"><i class="fas fa-shield-halved"></i> Field Verified (${count} file${count > 1 ? 's' : ''})</span>`
+                : `<span class="footer-badge-unverified"><i class="fas fa-clock"></i> Unverified — no media attached</span>`;
+        }
+
+        function resetMediaState() {
+            // Revoke all URLs
+            mediaFiles.forEach(f => { if (f) URL.revokeObjectURL(f.url); });
+            mediaFiles = [];
+            document.getElementById('media-preview-grid').innerHTML = '';
+            updateVerificationStatus();
+            document.getElementById('media-upload-zone').classList.remove('has-files');
+        }
+
+        // ==================== CAMERA ====================
+        function openCamera(mode) {
+            // Prefer native camera on mobile via hidden input
+            if (/Android|iPhone|iPad|iPod/i.test(navigator.userAgent)) {
+                if (mode === 'photo') {
+                    document.getElementById('camera-photo-input').click();
+                } else {
+                    document.getElementById('camera-video-input').click();
+                }
+                return;
+            }
+
+            // Desktop: show custom camera overlay
+            cameraMode = mode;
+            isRecording = false;
+            recordedChunks = [];
+            facingMode = 'environment';
+
+            const overlay = document.getElementById('camera-overlay');
+            const title = document.getElementById('camera-title');
+            const hint = document.getElementById('camera-hint');
+            const captureBtn = document.getElementById('cam-capture-btn');
+
+            overlay.style.display = 'flex';
+            title.innerHTML = mode === 'photo'
+                ? '<i class="fas fa-camera"></i> Take Photo'
+                : '<i class="fas fa-video"></i> Record Video';
+            hint.textContent = mode === 'photo' ? 'Tap the button to capture' : 'Tap to start recording';
+            captureBtn.classList.remove('recording');
+
+            startCameraStream();
+        }
+
+        async function startCameraStream() {
+            try {
+                if (cameraStream) {
+                    cameraStream.getTracks().forEach(t => t.stop());
+                }
+                cameraStream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: facingMode },
+                    audio: cameraMode === 'video'
+                });
+                document.getElementById('camera-preview').srcObject = cameraStream;
+            } catch (err) {
+                showToast('Cannot access camera: ' + err.message, 'warning');
+                closeCamera();
+            }
+        }
+
+        function flipCamera() {
+            facingMode = facingMode === 'environment' ? 'user' : 'environment';
+            startCameraStream();
+        }
+
+        function captureMedia() {
+            if (cameraMode === 'photo') {
+                capturePhoto();
+            } else {
+                toggleVideoRecord();
+            }
+        }
+
+        function capturePhoto() {
+            const video = document.getElementById('camera-preview');
+            const canvas = document.getElementById('camera-canvas');
+            canvas.width  = video.videoWidth;
+            canvas.height = video.videoHeight;
+            canvas.getContext('2d').drawImage(video, 0, 0);
+
+            canvas.toBlob(blob => {
+                const file = new File([blob], `photo_${Date.now()}.jpg`, { type: 'image/jpeg' });
+                addMediaFiles([file]);
+                showToast('Photo captured!', 'success');
+                closeCamera();
+            }, 'image/jpeg', 0.92);
+        }
+
+        function toggleVideoRecord() {
+            const captureBtn = document.getElementById('cam-capture-btn');
+            const hint = document.getElementById('camera-hint');
+
+            if (!isRecording) {
+                // Start recording
+                recordedChunks = [];
+                const options = { mimeType: 'video/webm;codecs=vp9' };
+                try {
+                    mediaRecorder = new MediaRecorder(cameraStream, options);
+                } catch {
+                    mediaRecorder = new MediaRecorder(cameraStream);
+                }
+                mediaRecorder.ondataavailable = e => { if (e.data.size > 0) recordedChunks.push(e.data); };
+                mediaRecorder.onstop = saveRecordedVideo;
+                mediaRecorder.start(100);
+
+                isRecording = true;
+                captureBtn.classList.add('recording');
+                hint.innerHTML = `<span class="rec-dot"></span> Recording... Tap to stop`;
+            } else {
+                // Stop recording
+                mediaRecorder.stop();
+                isRecording = false;
+                captureBtn.classList.remove('recording');
+                hint.textContent = 'Saving...';
+            }
+        }
+
+        function saveRecordedVideo() {
+            const blob = new Blob(recordedChunks, { type: 'video/webm' });
+            const file = new File([blob], `video_${Date.now()}.webm`, { type: 'video/webm' });
+            addMediaFiles([file]);
+            showToast('Video saved!', 'success');
+            closeCamera();
+        }
+
+        function closeCamera() {
+            if (isRecording && mediaRecorder && mediaRecorder.state !== 'inactive') {
+                mediaRecorder.stop();
+                isRecording = false;
+            }
+            if (cameraStream) {
+                cameraStream.getTracks().forEach(t => t.stop());
+                cameraStream = null;
+            }
+            document.getElementById('camera-overlay').style.display = 'none';
+            document.getElementById('camera-preview').srcObject = null;
+        }
+
+        // Expose camera functions
+        window.openCamera = openCamera;
+        window.closeCamera = closeCamera;
+        window.flipCamera = flipCamera;
+        window.captureMedia = captureMedia;
+        window.removeMedia = removeMedia;
+        window.onMediaDragOver = onMediaDragOver;
+        window.onMediaDragLeave = onMediaDragLeave;
+        window.onMediaDrop = onMediaDrop;
+        window.onMediaFilesSelected = onMediaFilesSelected;
+        window.openReportModal = openReportModal;
+        window.closeReportModal = closeReportModal;
+        window.submitReport = submitReport;
+        window.toggleHeatmap = toggleHeatmap;
+        window.applyFilters = applyFilters;
+        window.refreshData = refreshData;
+        window.clearLocation = clearLocation;
+        window.goToCurrentLocation = goToCurrentLocation;
+        window.switchLocationTab = switchLocationTab;
+        window.resetMiniMap = resetMiniMap;
+    </script>
+</body>
+</html>
