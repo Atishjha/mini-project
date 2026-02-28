@@ -8,20 +8,22 @@ class EmergencyMap {
         this.resourcesLayer = null;
         this.routesLayer = null;
         this.heatmapLayer = null;
+        this.crowdLayer = null;          // 👥 Crowd detection layer
         this.selectedLocation = null;
         this.tempMarker = null;
         this.activeIncidents = [];
+        this.activeCrowds = [];          // 👥 Crowd detection data cache
         this.baseUrl = 'http://localhost:5000';
         this.isReportModalOpen = false;
-        
+
         this.initialize();
         this.startLiveUpdates();
     }
-    
+
     initialize() {
         // Initialize map centered on Delhi
         this.map = L.map('map').setView([28.6139, 77.2090], 12);
-        
+
         // Add multiple base layers for better context
         const baseLayers = {
             "Street Map": L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -37,39 +39,39 @@ class EmergencyMap {
                 maxZoom: 19
             })
         };
-        
+
         // Add default base layer
         baseLayers["Street Map"].addTo(this.map);
-        
+
         // Create layer groups
         this.incidentsLayer = L.layerGroup().addTo(this.map);
         this.resourcesLayer = L.layerGroup().addTo(this.map);
         this.routesLayer = L.layerGroup().addTo(this.map);
-        
+        this.crowdLayer = L.layerGroup().addTo(this.map);  // 👥 Crowd layer
+
         // Add layer control
         L.control.layers(baseLayers, {
             'Active Incidents': this.incidentsLayer,
             'Emergency Resources': this.resourcesLayer,
-            'Dispatch Routes': this.routesLayer
+            'Dispatch Routes': this.routesLayer,
+            '👥 Crowd Detections': this.crowdLayer
         }).addTo(this.map);
-        
+
         // Add controls
         this.addControls();
         this.addLegend();
         this.addEmergencyInfo();
-        
+
         // Add click handler for location selection
-        this.map.on('click', (e) => {
-            this.handleMapClick(e);
-        });
-        
+        this.map.on('click', (e) => this.handleMapClick(e));
+
         // Load initial data
         this.loadData();
-        
+
         // Set up modal state tracking
         this.setupModalTracking();
     }
-    
+
     setupModalTracking() {
         // Track when report modal is open/closed
         const modalEl = document.getElementById('reportModal');
@@ -78,14 +80,14 @@ class EmergencyMap {
                 this.isReportModalOpen = true;
                 console.log('Report modal opened');
             });
-            
+
             modalEl.addEventListener('hide.bs.modal', () => {
                 this.isReportModalOpen = false;
                 console.log('Report modal closed');
             });
         }
     }
-    
+
     addEmergencyInfo() {
         // Add emergency info panel
         const infoControl = L.control({ position: 'topright' });
@@ -105,32 +107,26 @@ class EmergencyMap {
         };
         infoControl.addTo(this.map);
     }
-    
+
     addControls() {
         // Add zoom control
-        L.control.zoom({
-            position: 'topright'
-        }).addTo(this.map);
-        
+        L.control.zoom({ position: 'topright' }).addTo(this.map);
+
         // Add scale control
         L.control.scale({
             imperial: false,
             position: 'bottomleft'
         }).addTo(this.map);
-        
+
         // Add locate control
         L.control.locate({
             position: 'topright',
-            strings: {
-                title: "Show my location"
-            }
+            strings: { title: "Show my location" }
         }).addTo(this.map);
-        
+
         // Add fullscreen control
-        L.control.fullscreen({
-            position: 'topright'
-        }).addTo(this.map);
-        
+        L.control.fullscreen({ position: 'topright' }).addTo(this.map);
+
         // Add custom emergency button
         const emergencyBtn = L.control({ position: 'topleft' });
         emergencyBtn.onAdd = () => {
@@ -144,10 +140,10 @@ class EmergencyMap {
         };
         emergencyBtn.addTo(this.map);
     }
-    
+
     addLegend() {
         const legend = L.control({ position: 'bottomright' });
-        
+
         legend.onAdd = () => {
             const div = L.DomUtil.create('div', 'legend');
             div.innerHTML = `
@@ -186,49 +182,72 @@ class EmergencyMap {
                     <div class="pulsating-marker"></div>
                     <span style="margin-left: 10px;">Active Emergency</span>
                 </div>
+                <hr>
+                <strong style="font-size:12px;">👥 CROWD DENSITY</strong>
+                <div class="legend-item" style="margin-top:4px;">
+                    <div style="width:18px;height:18px;border-radius:50%;background:#8B0000;opacity:0.85;margin-right:10px;border:2px solid white;"></div>
+                    <span>Critical (&gt;3/m²)</span>
+                </div>
+                <div class="legend-item">
+                    <div style="width:16px;height:16px;border-radius:50%;background:#FF4500;opacity:0.8;margin-right:10px;border:2px solid white;"></div>
+                    <span>High (1.5–3/m²)</span>
+                </div>
+                <div class="legend-item">
+                    <div style="width:14px;height:14px;border-radius:50%;background:#FFA500;opacity:0.75;margin-right:10px;border:2px solid white;"></div>
+                    <span>Moderate (0.5–1.5/m²)</span>
+                </div>
+                <div class="legend-item">
+                    <div style="width:12px;height:12px;border-radius:50%;background:#32CD32;opacity:0.7;margin-right:10px;border:2px solid white;"></div>
+                    <span>Low (&lt;0.5/m²)</span>
+                </div>
+                <div class="legend-item" style="margin-top:4px;">
+                    <span style="font-size:14px;margin-right:8px;">⚠️</span>
+                    <span style="font-size:11px;">Anomalous crowd</span>
+                </div>
             `;
             return div;
         };
-        
+
         legend.addTo(this.map);
     }
-    
+
     async loadData() {
         try {
             if (typeof showLoading === 'function') showLoading('Loading emergency data...');
-            
-            // Fetch incidents and resources in parallel
-            const [incidents, resources] = await Promise.all([
+
+            // Fetch incidents, resources, and crowd detections in parallel
+            const [incidents, resources, crowds] = await Promise.all([
                 this.fetchIncidents(),
-                this.fetchResources()
+                this.fetchResources(),
+                this.fetchCrowds()
             ]);
-            
-            // Store active incidents
+
+            // Store active incidents + crowds
             this.activeIncidents = incidents.features || [];
-            
+            this.activeCrowds = crowds.features || [];
+
             // Update layers
             this.renderIncidents(incidents);
             this.renderResources(resources);
-            
+            this.renderCrowds(crowds);
+
             // Update dashboard and emergency info
-            if (typeof updateDashboard === 'function') updateDashboard(incidents, resources);
+            if (typeof updateDashboard === 'function') updateDashboard(incidents, resources, crowds);
             this.updateEmergencyList(incidents);
-            
+
             if (typeof hideLoading === 'function') hideLoading();
             if (typeof updateLastUpdated === 'function') updateLastUpdated();
-            
-            // Show summary toast
+
             if (this.activeIncidents.length > 0 && typeof showToast === 'function') {
                 showToast(`${this.activeIncidents.length} active emergency/emergencies`, 'warning');
             }
-            
         } catch (error) {
             console.error('Error loading data:', error);
             if (typeof showToast === 'function') showToast('Failed to load data. Using cached data.', 'warning');
             if (typeof hideLoading === 'function') hideLoading();
         }
     }
-    
+
     async fetchIncidents() {
         try {
             const response = await fetch(`${this.baseUrl}/api/incidents/active`);
@@ -239,7 +258,7 @@ class EmergencyMap {
             return this.getMockIncidents();
         }
     }
-    
+
     async fetchResources() {
         try {
             const response = await fetch(`${this.baseUrl}/api/resources/available`);
@@ -250,30 +269,228 @@ class EmergencyMap {
             return this.getMockResources();
         }
     }
-    
+
+    // ─────────────────────────────────────────────
+    // 👥 CROWD DETECTION METHODS
+    // ─────────────────────────────────────────────
+
+    async fetchCrowds() {
+        try {
+            const response = await fetch(`${this.baseUrl}/api/crowd/geojson`);
+            if (!response.ok) throw new Error('Failed to fetch crowd data');
+            return await response.json();
+        } catch (error) {
+            console.error('Fetch crowds error:', error);
+            return this.getMockCrowds();
+        }
+    }
+
+    renderCrowds(data) {
+        this.crowdLayer.clearLayers();
+        if (!data.features || data.features.length === 0) return;
+
+        data.features.forEach(feature => {
+            const coords = feature.geometry.coordinates;  // [lng, lat]
+            const props = feature.properties;
+            const lat = coords[1], lng = coords[0];
+
+            const { color, radius } = this.getCrowdStyle(props.crowd_density, props.estimated_crowd_size);
+
+            const circle = L.circleMarker([lat, lng], {
+                radius: radius,
+                color: color,
+                fillColor: color,
+                fillOpacity: 0.35,
+                weight: props.is_anomalous ? 3 : 1.5,
+                dashArray: props.is_anomalous ? '6,4' : null
+            });
+
+            const iconHtml = `
+                <div style="
+                    background:${color};
+                    border:2px solid white;
+                    border-radius:50%;
+                    width:28px;height:28px;
+                    display:flex;align-items:center;justify-content:center;
+                    color:white;font-size:13px;
+                    box-shadow:0 2px 6px rgba(0,0,0,0.4);
+                    ${props.is_anomalous ? 'animation:pulse 1.5s infinite;' : ''}
+                ">
+                    👥
+                    ${props.is_anomalous ? '<span style="position:absolute;top:-6px;right:-6px;font-size:10px;">⚠️</span>' : ''}
+                </div>
+            `;
+
+            const marker = L.marker([lat, lng], {
+                icon: L.divIcon({
+                    html: iconHtml,
+                    className: 'emergency-marker-container',
+                    iconSize: [28, 28]
+                })
+            });
+
+            const popup = this.createCrowdPopup(props, lat, lng);
+            circle.bindPopup(popup);
+            marker.bindPopup(popup);
+
+            circle.addTo(this.crowdLayer);
+            marker.addTo(this.crowdLayer);
+        });
+    }
+
+    getCrowdStyle(density, crowdSize) {
+        const styles = {
+            critical: { color: '#8B0000', baseRadius: 24 },
+            high: { color: '#FF4500', baseRadius: 20 },
+            moderate: { color: '#FFA500', baseRadius: 16 },
+            low: { color: '#32CD32', baseRadius: 12 }
+        };
+        const s = styles[density] || styles.moderate;
+        const bonus = Math.min(Math.floor((crowdSize || 0) / 1000), 8);
+        return { color: s.color, radius: s.baseRadius + bonus };
+    }
+
+    createCrowdPopup(props, lat, lng) {
+        const densityColors = {
+            critical: '#8B0000',
+            high: '#FF4500',
+            moderate: '#FFA500',
+            low: '#32CD32'
+        };
+        const color = densityColors[props.crowd_density] || '#FFA500';
+        const anomalyBadge = props.is_anomalous
+            ? `<span class="badge" style="background:#FF4500;">⚠️ ANOMALOUS</span>`
+            : '';
+
+        return `
+            <div style="min-width:240px;font-family:Segoe UI,sans-serif;">
+                <div style="background:${color};color:white;padding:8px 10px;border-radius:5px 5px 0 0;margin:-12px -12px 10px -12px;">
+                    <strong>👥 CROWD DETECTION</strong>
+                    <span style="float:right;background:rgba(255,255,255,0.25);padding:1px 7px;border-radius:10px;font-size:12px;">
+                        ${String(props.crowd_density || 'moderate').toUpperCase()}
+                    </span>
+                </div>
+                <div style="padding:0 4px;">
+                    <p style="margin:4px 0;"><i class="fas fa-map-marker-alt" style="color:#666;width:18px;"></i>
+                        <strong>${props.address || 'Unknown'}</strong></p>
+                    <p style="margin:4px 0;"><i class="fas fa-building" style="color:#666;width:18px;"></i>
+                        ${(props.place_type || 'monitored_area').replace(/_/g,' ')}</p>
+                    <p style="margin:4px 0;"><i class="fas fa-users" style="color:#666;width:18px;"></i>
+                        ~<strong>${Number(props.estimated_crowd_size || 0).toLocaleString()}</strong> people</p>
+                    <p style="margin:4px 0;"><i class="fas fa-satellite" style="color:#666;width:18px;"></i>
+                        Source: ${props.detection_source || 'camera'}
+                        <span style="float:right;font-size:11px;color:#666;">
+                            ${Math.round((props.detection_confidence || 0.85) * 100)}% confidence
+                        </span>
+                    </p>
+                    <p style="margin:4px 0;"><i class="fas fa-shield-alt" style="color:#666;width:18px;"></i>
+                        Risk: <strong style="color:${color};">${String(props.risk_level || 'moderate').toUpperCase()}</strong>
+                        ${anomalyBadge}
+                    </p>
+                    ${props.event ? `<p style="margin:4px 0;"><i class="fas fa-calendar" style="color:#666;width:18px;"></i> Event: ${props.event}</p>` : ''}
+                    <p style="margin:4px 0;font-size:11px;color:#888;">
+                        <i class="fas fa-clock" style="width:18px;"></i>
+                        ${new Date(props.detected_at || Date.now()).toLocaleString()}
+                    </p>
+                    <div style="display:flex;gap:5px;margin-top:8px;">
+                        <button class="btn btn-sm btn-primary" onclick="zoomToLocation(${lat},${lng})" style="flex:1;padding:4px;">
+                            <i class="fas fa-search"></i> Zoom
+                        </button>
+                        <button class="btn btn-sm btn-info" onclick="getDirections(${lat},${lng})" style="flex:1;padding:4px;">
+                            <i class="fas fa-directions"></i> Directions
+                        </button>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    // ✅ Keep ONLY ONE getMockCrowds() (removed duplicates + fixed indentation)
+    getMockCrowds() {
+        return {
+            type: 'FeatureCollection',
+            features: [
+                {
+                    type: 'Feature',
+                    geometry: { type: 'Point', coordinates: [77.2090, 28.6139] },
+                    properties: {
+                        id: 1,
+                        address: 'Connaught Place, Delhi',
+                        place_type: 'commercial',
+                        estimated_crowd_size: 1200,
+                        crowd_density: 'high',
+                        density_score: 0.78,
+                        detection_source: 'camera',
+                        detection_confidence: 0.91,
+                        is_anomalous: false,
+                        risk_level: 'high',
+                        detected_at: new Date().toISOString(),
+                        event: null
+                    }
+                },
+                {
+                    type: 'Feature',
+                    geometry: { type: 'Point', coordinates: [77.2167, 28.6448] },
+                    properties: {
+                        id: 2,
+                        address: 'Chandni Chowk, Delhi',
+                        place_type: 'market',
+                        estimated_crowd_size: 3400,
+                        crowd_density: 'critical',
+                        density_score: 0.95,
+                        detection_source: 'satellite',
+                        detection_confidence: 0.87,
+                        is_anomalous: true,
+                        risk_level: 'critical',
+                        detected_at: new Date().toISOString(),
+                        event: 'festival'
+                    }
+                },
+                {
+                    type: 'Feature',
+                    geometry: { type: 'Point', coordinates: [77.2295, 28.6129] },
+                    properties: {
+                        id: 3,
+                        address: 'India Gate Lawns, Delhi',
+                        place_type: 'open_field',
+                        estimated_crowd_size: 450,
+                        crowd_density: 'moderate',
+                        density_score: 0.42,
+                        detection_source: 'drone',
+                        detection_confidence: 0.95,
+                        is_anomalous: false,
+                        risk_level: 'moderate',
+                        detected_at: new Date().toISOString(),
+                        event: null
+                    }
+                }
+            ]
+        };
+    }
+
+    // ─────────────────────────────────────────────
+    // INCIDENTS / RESOURCES (your existing code)
+    // ─────────────────────────────────────────────
+
     renderIncidents(data) {
         this.incidentsLayer.clearLayers();
-        
-        if (!data.features || data.features.length === 0) {
-            return;
-        }
-        
+
+        if (!data.features || data.features.length === 0) return;
+
         data.features.forEach(feature => {
             const coords = feature.geometry.coordinates;
             const props = feature.properties;
-            
-            // Get severity-based styling
+
             const severity = props.severity || 3;
             const { color, size, pulse } = this.getSeverityStyle(severity);
-            
-            // Create custom marker with pulsing effect for active emergencies
+
             const markerHtml = `
                 <div class="emergency-marker ${pulse ? 'pulse' : ''}" 
                      style="background-color: ${color}; width: ${size}px; height: ${size}px; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; border: 2px solid white;">
                     ${severity}
                 </div>
             `;
-            
+
             const marker = L.marker([coords[1], coords[0]], {
                 icon: L.divIcon({
                     html: markerHtml,
@@ -281,89 +498,81 @@ class EmergencyMap {
                     iconSize: [size, size]
                 })
             });
-            
-            // Enhanced popup with more details
+
             const popupContent = this.createEnhancedIncidentPopup(props, coords);
             marker.bindPopup(popupContent);
-            
-            // Add hover effect
-            marker.on('mouseover', () => {
-                this.showIncidentPreview(props, coords);
-            });
-            
-            marker.on('mouseout', () => {
-                this.hideIncidentPreview();
-            });
-            
+
+            marker.on('mouseover', () => this.showIncidentPreview(props, coords));
+            marker.on('mouseout', () => this.hideIncidentPreview());
+
             marker.addTo(this.incidentsLayer);
         });
-        
-        // Fit bounds to show all incidents
+
         if (data.features.length > 0) {
-            const bounds = L.latLngBounds(data.features.map(f => 
-                [f.geometry.coordinates[1], f.geometry.coordinates[0]]
-            ));
+            const bounds = L.latLngBounds(
+                data.features.map(f => [f.geometry.coordinates[1], f.geometry.coordinates[0]])
+            );
             this.map.fitBounds(bounds, { padding: [50, 50] });
         }
     }
-    
+
     getSeverityStyle(severity) {
         const styles = {
-            5: { color: '#ff0000', size: 40, pulse: true },  // Critical - Red, pulsing
-            4: { color: '#ff6600', size: 35, pulse: true },  // High - Orange, pulsing
-            3: { color: '#ffcc00', size: 30, pulse: false }, // Medium - Yellow
-            2: { color: '#00cc00', size: 25, pulse: false }, // Low - Green
-            1: { color: '#009900', size: 20, pulse: false }  // Very Low - Dark Green
+            5: { color: '#ff0000', size: 40, pulse: true },
+            4: { color: '#ff6600', size: 35, pulse: true },
+            3: { color: '#ffcc00', size: 30, pulse: false },
+            2: { color: '#00cc00', size: 25, pulse: false },
+            1: { color: '#009900', size: 20, pulse: false }
         };
         return styles[severity] || styles[3];
     }
-    
+
     createEnhancedIncidentPopup(props, coords) {
         const severity = props.severity || 3;
         const severityClass = this.getSeverityClass(severity);
         const timeAgo = this.getTimeAgo(props.reported_at);
-        
+
         return `
             <div class="incident-popup" style="min-width: 250px;">
                 <div class="popup-header ${severityClass}" style="padding: 10px; background-color: ${this.getSeverityColor(severity)}; color: white; border-radius: 5px 5px 0 0;">
                     <h5 style="margin: 0;"><i class="fas fa-exclamation-triangle"></i> ${props.type.toUpperCase()}</h5>
                     <span class="severity-badge" style="background: rgba(255,255,255,0.2); padding: 2px 8px; border-radius: 12px; font-size: 12px;">Severity: ${severity}/5</span>
                 </div>
-                
+
                 <div class="popup-body" style="padding: 10px;">
                     <div class="info-row" style="display: flex; margin-bottom: 8px;">
                         <i class="fas fa-map-marker-alt" style="width: 20px; color: #666;"></i>
                         <span><strong>Location:</strong> ${props.address || 'Unknown'}</span>
                     </div>
-                    
+
                     <div class="info-row" style="display: flex; margin-bottom: 8px;">
                         <i class="fas fa-clock" style="width: 20px; color: #666;"></i>
                         <span><strong>Reported:</strong> ${new Date(props.reported_at).toLocaleString()} (${timeAgo})</span>
                     </div>
-                    
+
                     <div class="info-row" style="display: flex; margin-bottom: 8px;">
                         <i class="fas fa-info-circle" style="width: 20px; color: #666;"></i>
                         <span><strong>Status:</strong> <span class="badge bg-danger">${props.status}</span></span>
                     </div>
-                    
+
                     ${props.description ? `
                         <div class="info-row" style="display: flex; margin-bottom: 8px;">
                             <i class="fas fa-align-left" style="width: 20px; color: #666;"></i>
                             <span><strong>Description:</strong> ${props.description}</span>
                         </div>
                     ` : ''}
-                    
+
                     <div class="action-buttons" style="display: flex; gap: 5px; margin-top: 10px;">
                         <button class="btn btn-primary btn-sm" onclick="zoomToLocation(${coords[1]}, ${coords[0]})" style="flex: 1; padding: 5px;">
                             <i class="fas fa-search"></i> Zoom
                         </button>
-                        
+
                         ${window.hasPermission && hasPermission('dispatch_resources') ? `
                             <button class="btn btn-danger btn-sm" onclick="dispatchToIncident(${props.id})" style="flex: 1; padding: 5px;">
                                 <i class="fas fa-truck"></i> Dispatch
                             </button>
                         ` : ''}
-                        
+
                         <button class="btn btn-info btn-sm" onclick="getDirections(${coords[1]}, ${coords[0]})" style="flex: 1; padding: 5px;">
                             <i class="fas fa-directions"></i> Directions
                         </button>
@@ -372,21 +581,20 @@ class EmergencyMap {
             </div>
         `;
     }
-    
+
     updateEmergencyList(incidents) {
         const listContainer = document.getElementById('live-emergency-list');
         if (!listContainer) return;
-        
+
         if (!incidents.features || incidents.features.length === 0) {
             listContainer.innerHTML = '<p class="text-muted small mb-0">No active emergencies</p>';
             return;
         }
-        
-        // Sort by severity (highest first)
-        const sorted = [...incidents.features].sort((a, b) => 
+
+        const sorted = [...incidents.features].sort((a, b) =>
             (b.properties.severity || 0) - (a.properties.severity || 0)
         );
-        
+
         let html = '';
         sorted.forEach(feature => {
             const props = feature.properties;
@@ -394,7 +602,7 @@ class EmergencyMap {
             const severity = props.severity || 3;
             const severityColor = this.getSeverityColor(severity);
             const timeAgo = this.getTimeAgo(props.reported_at);
-            
+
             html += `
                 <div class="emergency-list-item" onclick="zoomToLocation(${coords[1]}, ${coords[0]})" style="cursor: pointer; padding: 8px; border-bottom: 1px solid #444;">
                     <div class="d-flex align-items-center">
@@ -411,13 +619,12 @@ class EmergencyMap {
                 </div>
             `;
         });
-        
+
         listContainer.innerHTML = html;
     }
-    
+
     showIncidentPreview(props, coords) {
-        // Show a small preview tooltip on hover
-        const preview = L.popup({ className: 'preview-popup', offset: [0, -30] })
+        L.popup({ className: 'preview-popup', offset: [0, -30] })
             .setLatLng([coords[1], coords[0]])
             .setContent(`
                 <strong>${props.type}</strong><br>
@@ -426,11 +633,11 @@ class EmergencyMap {
             `)
             .openOn(this.map);
     }
-    
+
     hideIncidentPreview() {
         this.map.closePopup();
     }
-    
+
     getSeverityColor(severity) {
         const colors = {
             5: '#ff0000',
@@ -441,7 +648,7 @@ class EmergencyMap {
         };
         return colors[severity] || '#ffcc00';
     }
-    
+
     getSeverityClass(severity) {
         const classes = {
             5: 'critical',
@@ -452,46 +659,41 @@ class EmergencyMap {
         };
         return classes[severity] || 'medium';
     }
-    
+
     getTimeAgo(timestamp) {
         const now = new Date();
         const past = new Date(timestamp);
         const diffMs = now - past;
         const diffMins = Math.floor(diffMs / 60000);
-        
+
         if (diffMins < 1) return 'just now';
         if (diffMins < 60) return `${diffMins} min ago`;
-        
+
         const diffHours = Math.floor(diffMins / 60);
         if (diffHours < 24) return `${diffHours} hour${diffHours > 1 ? 's' : ''} ago`;
-        
+
         const diffDays = Math.floor(diffHours / 24);
         return `${diffDays} day${diffDays > 1 ? 's' : ''} ago`;
     }
-    
+
     renderResources(data) {
         this.resourcesLayer.clearLayers();
-        
-        if (!data.features || data.features.length === 0) {
-            return;
-        }
-        
+        if (!data.features || data.features.length === 0) return;
+
         data.features.forEach(feature => {
             const coords = feature.geometry.coordinates;
             const props = feature.properties;
-            
-            // Create custom icon based on resource type
+
             const icon = this.getResourceIcon(props.type);
-            
-            const marker = L.marker([coords[1], coords[0]], { icon: icon });
-            
+            const marker = L.marker([coords[1], coords[0]], { icon });
+
             const popupContent = this.createResourcePopup(props, coords);
             marker.bindPopup(popupContent);
-            
+
             marker.addTo(this.resourcesLayer);
         });
     }
-    
+
     getResourceIcon(type) {
         const icons = {
             'ambulance': L.divIcon({
@@ -512,7 +714,7 @@ class EmergencyMap {
         };
         return icons[type] || icons.ambulance;
     }
-    
+
     createResourcePopup(props, coords) {
         return `
             <div class="resource-popup" style="min-width: 200px;">
@@ -529,63 +731,53 @@ class EmergencyMap {
             </div>
         `;
     }
-    
+
     handleMapClick(e) {
         const { lat, lng } = e.latlng;
         console.log('Map clicked at:', lat, lng);
         console.log('Report modal open?', this.isReportModalOpen);
-        
-        // Store selected location
+
         this.selectedLocation = { lat, lng };
-        
-        // If report modal is open, update the form
+
         if (this.isReportModalOpen) {
             this.selectLocationForReport(lat, lng);
         } else {
-            // Just add temporary marker for normal clicks
             this.addTempMarker(lat, lng);
         }
     }
-    
+
     selectLocationForReport(lat, lng) {
         console.log('Selecting location for report:', lat, lng);
-        
-        // Update form inputs
+
         const latElement = document.getElementById('selected-lat');
         const lngElement = document.getElementById('selected-lng');
         const locationInput = document.getElementById('location-input');
         const submitBtn = document.getElementById('submit-btn');
-        
+
         if (latElement) latElement.textContent = lat.toFixed(6);
         if (lngElement) lngElement.textContent = lng.toFixed(6);
         if (locationInput) locationInput.value = `Lat: ${lat.toFixed(6)}, Lng: ${lng.toFixed(6)}`;
-        
-        // Add temporary marker
+
         this.addTempMarker(lat, lng);
-        
-        // Enable submit button
+
         if (submitBtn) submitBtn.disabled = false;
-        
-        // Show toast notification
+
         if (typeof showToast === 'function') {
             showToast('Location selected! Click Submit to continue', 'success');
         }
-        
-        // Switch to map tab if it exists
+
         const mapTab = document.getElementById('map-tab');
         if (mapTab && typeof bootstrap !== 'undefined') {
             const tab = new bootstrap.Tab(mapTab);
             tab.show();
         }
     }
-    
+
     addTempMarker(lat, lng) {
-        // Remove existing temp marker
         if (this.tempMarker) {
             this.map.removeLayer(this.tempMarker);
         }
-        
-        // Add new temp marker with animation
+
         this.tempMarker = L.circleMarker([lat, lng], {
             radius: 12,
             color: '#007bff',
@@ -595,14 +787,14 @@ class EmergencyMap {
             className: 'location-marker'
         }).addTo(this.map);
     }
-    
+
     clearTempMarker() {
         if (this.tempMarker) {
             this.map.removeLayer(this.tempMarker);
             this.tempMarker = null;
         }
     }
-    
+
     toggleHeatmap() {
         if (this.heatmapLayer) {
             this.map.removeLayer(this.heatmapLayer);
@@ -612,15 +804,14 @@ class EmergencyMap {
             this.createHeatmap();
         }
     }
-    
+
     createHeatmap() {
-        // Collect incident locations for heatmap
         const heatData = [];
         this.incidentsLayer.eachLayer(layer => {
             const latlng = layer.getLatLng();
             heatData.push([latlng.lat, latlng.lng, 1]);
         });
-        
+
         if (heatData.length > 0) {
             this.heatmapLayer = L.heatLayer(heatData, {
                 radius: 25,
@@ -633,16 +824,15 @@ class EmergencyMap {
                     0.8: '#ff0000'
                 }
             }).addTo(this.map);
-            
+
             if (typeof showToast === 'function') showToast('Heatmap enabled', 'success');
         } else {
             if (typeof showToast === 'function') showToast('No data for heatmap', 'warning');
         }
     }
-    
+
     centerMap() {
         if (this.activeIncidents.length > 0) {
-            // Center on first incident
             const incident = this.activeIncidents[0];
             const coords = incident.geometry.coordinates;
             this.map.setView([coords[1], coords[0]], 14);
@@ -650,12 +840,11 @@ class EmergencyMap {
             this.map.setView([28.6139, 77.2090], 12);
         }
     }
-    
+
     startLiveUpdates() {
-        // Update every 30 seconds
         setInterval(() => this.loadData(), 30000);
     }
-    
+
     getMockIncidents() {
         return {
             type: 'FeatureCollection',
@@ -702,7 +891,7 @@ class EmergencyMap {
             ]
         };
     }
-    
+
     getMockResources() {
         return {
             type: 'FeatureCollection',
@@ -736,8 +925,6 @@ class EmergencyMap {
 let emergencyMap;
 document.addEventListener('DOMContentLoaded', () => {
     emergencyMap = new EmergencyMap();
-    
-    // Expose map instance globally
     window.emergencyMap = emergencyMap;
 });
 
@@ -759,17 +946,15 @@ function dispatchResource(resourceId) {
     }
 }
 
-// Function to manually set location from address search
 function setLocationFromAddress(lat, lng, address) {
     if (emergencyMap) {
         emergencyMap.selectLocationForReport(lat, lng);
-        
-        // Update address info if elements exist
+
         const addressInfo = document.getElementById('selected-address-info');
         const selectedAddress = document.getElementById('selected-address');
         const addressLat = document.getElementById('address-lat');
         const addressLng = document.getElementById('address-lng');
-        
+
         if (addressInfo && selectedAddress && addressLat && addressLng) {
             selectedAddress.textContent = address;
             addressLat.textContent = lat.toFixed(6);
@@ -779,5 +964,4 @@ function setLocationFromAddress(lat, lng, address) {
     }
 }
 
-// Make functions globally available
 window.setLocationFromAddress = setLocationFromAddress;
