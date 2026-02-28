@@ -6,6 +6,8 @@ from .user import User, CallerHistory
 from .zone import RiskZone, FloodZone
 from .crowd import CrowdLocation, CrowdData
 
+
+
 __all__ = [
     'db', 'init_db',
     'Incident',
